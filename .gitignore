@@ -1,0 +1,24 @@
+# 現場填報與權限資料（不可上傳）
+data/*.db
+data/*.db-*
+!data/.gitkeep
+
+# Python / Node 快取與本機相依套件
+__pycache__/
+*.py[cod]
+node_modules/
+
+# 測試與檢查輸出
+artifact_inspect/
+tmp_workbook_preview/
+*.log
+
+# 作業系統與編輯器檔案
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 本機封裝產物
+GitHub_上傳檔案/
+*_GitHub.zip
