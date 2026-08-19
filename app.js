@@ -2,6 +2,9 @@ const AUTHORITY_OWNER = 'yuan0914';
 const DEVICE_KEY = 'dongren-work-report-device-code-v1';
 const LEGACY_KEY = 'dongren-work-report-v3';
 const MIGRATION_KEY = 'dongren-work-report-server-migrated-v1';
+const BROWSER_DB_KEY = 'dongren-work-report-open-mode-v1';
+const STATIC_MODE = globalThis.location?.protocol === 'file:' || /\.github\.io$/i.test(globalThis.location?.hostname || '');
+const OPEN_USER = { id: 'OPEN', name: '免登入使用者', role: 'admin', active: true };
 
 let db = {
   reports: [],
@@ -130,13 +133,52 @@ function permissionCodeFromSuffix(value) {
   return /^[0-9]{3}$/.test(suffix) && suffix !== '000' ? `UG015${suffix}` : '';
 }
 
+function browserState() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(BROWSER_DB_KEY) || '{}');
+    return {
+      reports: Array.isArray(stored.reports) ? stored.reports : [],
+      source: Array.isArray(stored.source) ? stored.source : [],
+      sourceName: stored.sourceName || '',
+    };
+  } catch {
+    return { reports: [], source: [], sourceName: '' };
+  }
+}
+
+function saveBrowserState(state) {
+  localStorage.setItem(BROWSER_DB_KEY, JSON.stringify({
+    reports: state.reports || [], source: state.source || [], sourceName: state.sourceName || '',
+  }));
+}
+
+async function browserApi(path, options = {}) {
+  const state = browserState();
+  const method = options.method || 'GET';
+  if (path === '/api/health') return { ok: true, mode: 'browser' };
+  if (path === '/api/state') return { ...state, currentUser: OPEN_USER, users: [], nextUserId: '01', nextPermissionCode: '' };
+  if (path === '/api/reports' && method === 'POST') {
+    const report = { ...options.body, id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` };
+    state.reports.unshift(report); saveBrowserState(state); return { report };
+  }
+  if (path === '/api/source' && method === 'POST') {
+    state.source = Array.isArray(options.body?.source) ? options.body.source : [];
+    state.sourceName = options.body?.sourceName || '';
+    saveBrowserState(state); return { sourceRows: state.source.length };
+  }
+  if (method === 'DELETE' && path.startsWith('/api/reports/')) {
+    const id = decodeURIComponent(path.slice('/api/reports/'.length));
+    state.reports = state.reports.filter((report) => String(report.id) !== id);
+    saveBrowserState(state); return { ok: true };
+  }
+  throw Object.assign(new Error('此功能需要集中式伺服器'), { status: 404 });
+}
+
 async function api(path, options = {}) {
+  if (STATIC_MODE) return browserApi(path, options);
   const headers = new Headers(options.headers || {});
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
-  if (options.auth !== false) {
-    if (managerIdentifier) headers.set('X-Manager-Identifier', managerIdentifier);
-    else if (deviceCode()) headers.set('X-Permission-Code', deviceCode());
-  }
+  headers.set('X-Manager-Identifier', AUTHORITY_OWNER);
   let response;
   try {
     response = await fetch(path, {
@@ -191,15 +233,15 @@ async function syncState() {
 }
 
 function currentUser() {
-  return authUser;
+  return { ...OPEN_USER, name: clean(document.getElementById('reporterName')?.value) || OPEN_USER.name };
 }
 
 function isManager() {
-  return Boolean(managerIdentifier);
+  return false;
 }
 
 function isAdmin() {
-  return isManager() || currentUser()?.role === 'admin';
+  return true;
 }
 
 function showLogin(switching = false) {
@@ -296,24 +338,11 @@ async function loginManager() {
 }
 
 function applyAccess() {
-  const user = currentUser();
   const account = document.getElementById('accountBtn');
-  account.textContent = isManager()
-    ? `${AUTHORITY_OWNER}｜權限主管`
-    : user
-      ? `裝置 ${user.id}｜${user.name}｜${user.role === 'admin' ? '後台管理' : '前端登陸'}`
-      : '尚未啟用裝置';
-  document.getElementById('reporterIdentity').textContent = user
-    ? `填表人：${user.name}（${user.id}）`
-    : isManager()
-      ? '目前為主管設定模式；填報請改用個人權限碼登入'
-      : '尚未以權限碼啟用';
-  document.getElementById('backBtn').classList.toggle('locked', !isAdmin());
-  document.getElementById('permissionTabBtn').classList.toggle('hidden', !isManager());
-  if (!isManager() && document.getElementById('permissions').classList.contains('active')) backTab('reports');
-  if (!isAdmin() && document.getElementById('back').classList.contains('active')) setMode('front');
-  if (!user && !isManager()) showLogin(false);
-  renderPermissions();
+  account.textContent = STATIC_MODE ? '免登入｜本機儲存' : '免登入｜集中資料庫';
+  document.getElementById('reporterIdentity').textContent = '免登入填報';
+  document.getElementById('backBtn').classList.remove('locked');
+  document.getElementById('permissionTabBtn').classList.add('hidden');
 }
 
 function setMode(mode) {
@@ -331,8 +360,7 @@ function setMode(mode) {
 }
 
 function backTab(id) {
-  if (!isAdmin()) return;
-  if (id === 'permissions' && !isManager()) return toast('權限碼僅能由統一權限主管設定', true);
+  if (id === 'permissions') return;
   document.querySelectorAll('.back-tab').forEach((element) => element.classList.toggle('active', element.dataset.tab === id));
   document.querySelectorAll('.back-view').forEach((element) => element.classList.toggle('active', element.id === id));
 }
@@ -621,11 +649,12 @@ function allocateMaterial(material, locations) {
 
 function submitReport() {
   const user = currentUser();
+  const reporterName = clean(document.getElementById('reporterName').value);
   const spots = selectedSpots();
   const workersRaw = clean(document.getElementById('workers').value);
   const workers = n(workersRaw);
   const date = clean(document.getElementById('date').value);
-  if (!user) return toast('請先以個人權限碼啟用裝置後再填報', true);
+  if (!reporterName) return toast('請填寫填表人姓名', true);
   if (!date) return toast('請選擇施工日期', true);
   if (!spots.length) return toast('請直接從平面圖選擇至少一個施作空間', true);
   if (!workersRaw || workers < 0.5 || Math.abs(workers * 2 - Math.round(workers * 2)) > 1e-9) {
@@ -654,7 +683,7 @@ function submitReport() {
   pendingReport = {
     id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
     date,
-    reporter: user.name,
+    reporter: reporterName,
     reporterId: user.id,
     floor,
     items,
@@ -1118,25 +1147,10 @@ async function initialize() {
   calculate();
   renderReports();
   renderSource();
-  syncPermissionChecks();
-  const legacy = (() => {
-    try { return JSON.parse(localStorage.getItem(LEGACY_KEY) || '{}'); } catch { return {}; }
-  })();
-  if (!localStorage.getItem(DEVICE_KEY) && legacy.deviceCode) {
-    localStorage.setItem(DEVICE_KEY, clean(legacy.deviceCode).toUpperCase());
-  }
   try {
     await api('/api/health', { auth: false });
-    setConnection(true);
-    if (deviceCode()) {
-      try {
-        await syncState();
-      } catch (error) {
-        authUser = null;
-        if (error.status !== 401 && error.status !== 403) throw error;
-        toast('本裝置的權限碼已失效，請重新登入', true);
-      }
-    }
+    await syncState();
+    setConnection(true, STATIC_MODE ? '瀏覽器本機儲存模式' : '集中資料庫連線正常');
   } catch (error) {
     setConnection(false, '伺服器未啟動');
     toast('無法連接集中資料庫，請先啟動 server.py', true);
