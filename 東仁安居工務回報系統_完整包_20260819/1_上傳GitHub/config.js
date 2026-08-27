@@ -6,5 +6,5 @@
  *         每次「新增部署作業」都會換一組網址，換了就要回來改這裡。
  */
 window.DONREN_CONFIG = {
-  apiUrl: 'https://script.google.com/macros/s/AKfycby114yhLCE9tl93BdqLuzGOHKQRBIiwtXY4bgMujIRXdDkOe_G3AZwlxkl5QrwX3Kf4/exec',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbyTfauHZ4yrtzlU30tVxal5lMdS3ttaAiIS_61lg0y3jugVf88Iz5xA2KYDdWPZ8xFa/exec',
 };
