@@ -1,0 +1,1418 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>東仁安居｜平面圖區域編輯器</title>
+<script src="assets/xlsx.full.min.js" onerror="var s=document.createElement('script');s.src='xlsx.full.min.js';document.head.appendChild(s)"></script>
+<style>
+:root{
+  --navy:#101c31;--navy2:#192a45;--navy3:#22334f;--line:#2f4463;--line2:#3d5273;
+  --blue:#2f69e8;--blue2:#4a83ff;--ink:#e8eef8;--muted:#8fa3c0;
+  --green:#2fbf87;--amber:#f0a94a;--red:#f2726b;--white:#fff;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--navy);color:var(--ink);
+  font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;font-size:14px;overflow:hidden}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+
+/* ---------- 版面 ---------- */
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+.body{display:grid;grid-template-columns:1fr 356px;min-height:0}
+.stage{position:relative;background:#0a121f;min-width:0;overflow:hidden}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.side{background:var(--navy2);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+
+/* ---------- 工具列 ---------- */
+.bar{background:var(--navy2);border-bottom:1px solid var(--line);padding:9px 14px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bar .title{font-weight:900;font-size:15px;margin-right:6px;white-space:nowrap}
+.bar .title span{color:var(--blue2);font-size:11px;font-weight:500;display:block;margin-top:1px}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:0 3px}
+.btn{border:1px solid var(--line2);background:var(--navy3);color:var(--ink);
+  border-radius:8px;padding:8px 12px;font-size:13px;font-weight:700;white-space:nowrap}
+.btn:hover{border-color:var(--blue)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{background:var(--blue2)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--red);border-color:#6b3733}
+.btn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.sm{padding:6px 9px;font-size:12px}
+.file{position:relative;overflow:hidden}
+.file input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:200px}
+.tol{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+  border:1px solid var(--line2);border-radius:8px;padding:5px 9px;background:var(--navy)}
+.tol input{width:60px;background:var(--navy3);border:1px solid var(--line2);border-radius:6px;
+  padding:5px 7px;color:var(--ink);outline:none;text-align:center}
+.tol input:focus{border-color:var(--blue)}
+.tol small{font-size:10px;opacity:.75}
+.spacer{margin-left:auto}
+.zoom{display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.zoom button{border:0;background:var(--navy3);color:var(--ink);padding:8px 11px;font-weight:900;font-size:15px;line-height:1}
+.zoom button:hover{background:var(--blue)}
+.zoom span{padding:0 10px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:56px;text-align:center}
+
+/* ---------- 畫布覆蓋層 ---------- */
+.hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;
+  color:var(--muted);pointer-events:none;width:min(460px,86%);line-height:1.9}
+.hint b{color:var(--ink);display:block;font-size:17px;margin-bottom:9px}
+.hint kbd{background:var(--navy3);border:1px solid var(--line2);border-radius:4px;padding:1px 6px;font-size:12px}
+.statusbar{position:absolute;left:12px;bottom:12px;background:#0a121fdd;border:1px solid var(--line);
+  border-radius:8px;padding:7px 11px;font-size:11px;color:var(--muted);pointer-events:none;
+  font-variant-numeric:tabular-nums;line-height:1.7}
+.statusbar b{color:var(--ink)}
+.legend{position:absolute;right:12px;bottom:12px;background:#0a121fdd;border:1px solid var(--line);
+  border-radius:8px;padding:9px 11px;font-size:11px;pointer-events:none;display:grid;gap:5px}
+.legend div{display:flex;align-items:center;gap:7px;color:var(--muted)}
+.legend i{width:12px;height:12px;border-radius:3px;display:block;flex:none}
+
+/* ---------- 側欄 ---------- */
+.side-head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.side-head h2{margin:0;font-size:14px;flex:1}
+.side-scroll{overflow:auto;flex:1;min-height:0}
+.block{padding:13px 14px;border-bottom:1px solid var(--line)}
+.block h3{margin:0 0 10px;font-size:12px;color:var(--muted);letter-spacing:.08em;font-weight:700}
+.f{margin-bottom:9px}
+.f label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:700}
+.f input,.f select{width:100%;background:var(--navy);border:1px solid var(--line2);border-radius:7px;
+  padding:9px 10px;color:var(--ink);outline:none}
+.f input:focus,.f select:focus{border-color:var(--blue)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.chip{display:inline-block;border-radius:99px;padding:3px 9px;font-size:11px;font-weight:800}
+.chip.I{background:#1d3a6b;color:#9dc0ff}
+.chip.B{background:#0f4148;color:#7fdfe6}
+.chip.K{background:#4d3315;color:#ffc98a}
+.chip.Y{background:#12452f;color:#86e3b8}
+.chip.X{background:#3a2247;color:#d5a8f0}
+.empty{color:var(--muted);text-align:center;padding:26px 12px;line-height:1.8;font-size:12px}
+
+/* 資料對應卡 */
+.data{border:1px solid var(--line);border-radius:9px;padding:10px 11px;background:var(--navy);font-size:12px;line-height:1.75}
+.data.ok{border-color:#26624a;background:#10281f}
+.data.warn{border-color:#6b4a1d;background:#2a2013}
+.data.bad{border-color:#6b3733;background:#2c1917}
+.data b{color:var(--ink)}
+.data .k{color:var(--muted);display:inline-block;min-width:58px}
+.data ul{margin:6px 0 0;padding-left:17px}
+.data li{margin-bottom:2px}
+
+/* 清單 */
+.search{width:100%;background:var(--navy);border:1px solid var(--line2);border-radius:7px;
+  padding:8px 10px;color:var(--ink);outline:none;margin-bottom:9px}
+.list{display:grid;gap:5px}
+.item{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--navy);cursor:pointer}
+.item:hover{border-color:var(--line2)}
+.item.on{border-color:var(--blue);background:#16294a}
+.item i{width:11px;height:11px;border-radius:3px;display:block}
+.item .n{font-size:12px;line-height:1.4;min-width:0}
+.item .n b{display:block}
+.item .n small{color:var(--muted)}
+.item .warnmark{color:var(--amber);font-size:14px}
+.item .badmark{color:var(--red);font-size:14px}
+
+/* 檢核 */
+.check{display:grid;gap:7px}
+.check-row{display:flex;align-items:center;gap:9px;font-size:12px;padding:8px 10px;
+  border:1px solid var(--line);border-radius:8px;background:var(--navy)}
+.check-row b{margin-left:auto;font-variant-numeric:tabular-nums;font-size:14px}
+.check-row.ok b{color:var(--green)}
+.check-row.warn b{color:var(--amber)}
+.check-row.bad b{color:var(--red)}
+.check-row.click{cursor:pointer}
+.check-row.click:hover{border-color:var(--line2)}
+
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#123526;color:#fff;
+  border-radius:9px;padding:11px 17px;z-index:99;box-shadow:0 8px 26px #0007;font-size:13px}
+.toast.err{background:#4d1d20}
+
+@media(max-width:1000px){
+  .body{grid-template-columns:1fr}
+  .side{position:fixed;inset:auto 0 0 0;height:46vh;border-left:0;border-top:1px solid var(--line)}
+  .stage{height:calc(100vh - 46vh - 54px)}
+  .legend{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+<div class="bar">
+  <div class="title">平面圖區域編輯器<span>東仁安居工務回報系統</span></div>
+  <div class="sep"></div>
+
+  <label class="btn file">開啟平面圖<input type="file" accept="image/*" onchange="loadImage(event)"></label>
+  <button class="btn" onclick="seedFromBuiltin()">載入現有 145 個標號</button>
+  <label class="btn file">匯入數量明細<input type="file" accept=".xlsx,.xls" onchange="loadSource(event)"></label>
+  <label class="btn file">開啟既有設定<input type="file" accept=".json" onchange="loadProject(event)"></label>
+
+  <div class="sep"></div>
+  <button id="m-select" class="btn on" onclick="setMode('select')" title="快捷鍵 V">▖ 選取</button>
+  <button id="m-rect" class="btn" onclick="setMode('rect')" title="快捷鍵 R">▭ 畫矩形</button>
+  <button id="m-poly" class="btn" onclick="setMode('poly')" title="快捷鍵 P">⬠ 畫多邊形</button>
+  <button id="m-detect" class="btn" onclick="setMode('detect')" title="快捷鍵 A。點空間內部，自動框出輪廓">⌖ 自動偵測</button>
+  <button id="m-pan" class="btn" onclick="setMode('pan')" title="快捷鍵 H，或按住空白鍵拖曳">✥ 平移</button>
+  <span id="tolWrap" class="tol hidden">容差 <input id="tol" type="number" value="30" min="2" max="120" step="2"> <small>抓太少調大、擴散太多調小</small></span>
+
+  <div class="sep"></div>
+  <button class="btn sm" onclick="undo()" title="Ctrl+Z">↶ 復原</button>
+
+  <div class="spacer"></div>
+  <div class="zoom">
+    <button onclick="zoomBy(1/1.3)">−</button>
+    <span id="zoomLabel">100%</span>
+    <button onclick="zoomBy(1.3)">＋</button>
+  </div>
+  <button class="btn sm" onclick="fitView()">符合視窗</button>
+  <div class="sep"></div>
+  <button class="btn primary" onclick="exportProject()">⬇ 匯出設定檔</button>
+</div>
+
+<div class="body">
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="hint" id="hint">
+      <b>先開啟平面圖</b>
+      點左上角「開啟平面圖」，選 <kbd>floor-plan-04.png</kbd>。<br>
+      接著按「載入現有 145 個標號」，把你系統裡已經有的標號位置<br>
+      直接變成可調整的區域框，不必從零畫起。<br><br>
+      想讓它自己框？切到「⌖ 自動偵測」點空間內部，<br>
+      或在「選取」模式下對著空間<kbd>點兩下</kbd>。
+    </div>
+    <div class="statusbar" id="status"></div>
+    <div class="legend">
+      <div><i style="background:#4a83ff"></i>I 室內／臥室／客廳</div>
+      <div><i style="background:#2fc4d4"></i>B 廁所</div>
+      <div><i style="background:#f0a94a"></i>K 廚房</div>
+      <div><i style="background:#2fbf87"></i>Y 陽台</div>
+      <div><i style="background:#b57ce0"></i>其他</div>
+    </div>
+  </div>
+
+  <aside class="side">
+    <div class="side-head">
+      <h2 id="sideTitle">尚未選取區域</h2>
+      <button class="btn sm danger" id="delBtn" onclick="deleteSelected()" disabled>刪除</button>
+    </div>
+
+    <div class="side-scroll">
+      <div class="block" id="propBlock">
+        <h3>區域設定</h3>
+        <div class="row2">
+          <div class="f"><label>房號</label>
+            <input id="pRoom" list="roomList" placeholder="A19" oninput="updateProp()" autocomplete="off"></div>
+          <div class="f"><label>空間</label>
+            <input id="pLabel" list="labelList" placeholder="廁所" oninput="updateProp()" autocomplete="off"></div>
+        </div>
+        <div class="f"><label>自動判定代碼</label><div id="pCode">—</div></div>
+        <div class="f"><label>文字位置</label>
+          <button class="btn sm" style="width:100%" onclick="resetLabelPos()">重設為自動置中</button>
+          <small style="color:var(--muted);display:block;margin-top:5px;line-height:1.6">直接拖曳圖上的文字可自訂位置；多邊形預設會放在形狀內部最寬處。</small>
+        </div>
+        <div id="pData"></div>
+      </div>
+
+      <div class="block">
+        <h3>檢核</h3>
+        <div class="check" id="checks"></div>
+      </div>
+
+      <div class="block">
+        <h3>區域清單</h3>
+        <input class="search" id="listSearch" placeholder="搜尋房號或空間…" oninput="renderList()">
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+</div>
+
+<datalist id="roomList"></datalist>
+<datalist id="labelList"></datalist>
+<div id="toast" class="toast hidden"></div>
+
+<script>
+/* ================================================================
+   內建標號種子：來自現行系統 app.js 的 SPACE_HOTSPOTS
+   座標單位一律是「佔整張圖的百分比」，換圖尺寸也不會跑掉
+   ================================================================ */
+const SEED = [{"id":"A01-Y1","room":"A01","label":"陽台一","code":"Y","x":67.3,"y":6,"w":2.01,"h":2.2},{"id":"A01-Y2","room":"A01","label":"陽台二","code":"Y","x":63.49,"y":9.7,"w":2.01,"h":2.2},{"id":"A01-B","room":"A01","label":"廁所","code":"B","x":62.99,"y":14.2,"w":2.01,"h":2.2},{"id":"A02-Y","room":"A02","label":"陽台","code":"Y","x":69.8,"y":6.8,"w":2.01,"h":2.2},{"id":"A02-K","room":"A02","label":"廚房","code":"K","x":72.3,"y":6.8,"w":2.01,"h":2.2},{"id":"A02-I1","room":"A02","label":"臥室一","code":"I","x":70.1,"y":11.35,"w":2.39,"h":2.2},{"id":"A02-I2","room":"A02","label":"臥室二","code":"I","x":76.97,"y":9.74,"w":2.39,"h":2.2},{"id":"A02-I3","room":"A02","label":"客廳","code":"I","x":73.8,"y":11.35,"w":2.01,"h":2.2},{"id":"A02-B","room":"A02","label":"廁所","code":"B","x":77.7,"y":14.1,"w":2.01,"h":2.2},{"id":"A03-Y","room":"A03","label":"陽台","code":"Y","x":81.59,"y":4.3,"w":2.01,"h":2.2},{"id":"A03-I","room":"A03","label":"臥室","code":"I","x":81.01,"y":9.74,"w":2.01,"h":2.2},{"id":"A03-B","room":"A03","label":"廁所","code":"B","x":80.4,"y":14.1,"w":2.01,"h":2.2},{"id":"A04-I1","room":"A04","label":"主臥室","code":"I","x":84.67,"y":9.74,"w":2.39,"h":2.2},{"id":"A04-I2","room":"A04","label":"臥室一","code":"I","x":87.95,"y":9.74,"w":2.39,"h":2.2},{"id":"A04-I3","room":"A04","label":"客廳","code":"I","x":91.25,"y":9.74,"w":2.01,"h":2.2},{"id":"A04-I4","room":"A04","label":"臥室二","code":"I","x":94.33,"y":8.05,"w":2.39,"h":2.2},{"id":"A04-B1","room":"A04","label":"廁所一","code":"B","x":84.2,"y":14.2,"w":2.01,"h":2.2},{"id":"A04-B2","room":"A04","label":"廁所二","code":"B","x":94.59,"y":11.6,"w":2.01,"h":2.2},{"id":"A04-K","room":"A04","label":"廚房","code":"K","x":94.59,"y":14.5,"w":2.01,"h":2.2},{"id":"A04-Y","room":"A04","label":"陽台","code":"Y","x":97.3,"y":13,"w":2.01,"h":2.2},{"id":"A05-K","room":"A05","label":"廚房","code":"K","x":94.5,"y":20.7,"w":2.01,"h":2.2},{"id":"A05-Y","room":"A05","label":"陽台","code":"Y","x":97.3,"y":23.6,"w":2.01,"h":2.2},{"id":"A05-B1","room":"A05","label":"廁所一","code":"B","x":84.2,"y":21.9,"w":2.01,"h":2.2},{"id":"A05-B2","room":"A05","label":"廁所二","code":"B","x":94.59,"y":24.1,"w":2.01,"h":2.2},{"id":"A05-I1","room":"A05","label":"主臥室","code":"I","x":84.5,"y":25.86,"w":2.39,"h":2.2},{"id":"A05-I2","room":"A05","label":"臥室一","code":"I","x":88.01,"y":25.86,"w":2.39,"h":2.2},{"id":"A05-I3","room":"A05","label":"客廳","code":"I","x":91.39,"y":24.13,"w":2.01,"h":2.2},{"id":"A05-I4","room":"A05","label":"臥室二","code":"I","x":94.33,"y":26.71,"w":2.39,"h":2.2},{"id":"A06-B","room":"A06","label":"廁所","code":"B","x":80.09,"y":21.8,"w":2.01,"h":2.2},{"id":"A06-I","room":"A06","label":"臥室","code":"I","x":81.2,"y":25.86,"w":2.01,"h":2.2},{"id":"A06-Y","room":"A06","label":"陽台","code":"Y","x":81.2,"y":30.5,"w":2.01,"h":2.2},{"id":"A07-B","room":"A07","label":"廁所","code":"B","x":77.09,"y":21.8,"w":2.01,"h":2.2},{"id":"A07-I","room":"A07","label":"臥室","code":"I","x":76.31,"y":25.86,"w":2.01,"h":2.2},{"id":"A07-Y","room":"A07","label":"陽台","code":"Y","x":75.59,"y":30.5,"w":2.01,"h":2.2},{"id":"A08-B","room":"A08","label":"廁所","code":"B","x":61.99,"y":33.2,"w":2.01,"h":2.2},{"id":"A08-I","room":"A08","label":"臥室","code":"I","x":65.79,"y":33.81,"w":2.01,"h":2.2},{"id":"A08-Y","room":"A08","label":"陽台","code":"Y","x":69.7,"y":35,"w":2.01,"h":2.2},{"id":"A09-B","room":"A09","label":"廁所","code":"B","x":61.99,"y":40.6,"w":2.01,"h":2.2},{"id":"A09-I","room":"A09","label":"臥室","code":"I","x":65.79,"y":40.46,"w":2.01,"h":2.2},{"id":"A09-Y","room":"A09","label":"陽台","code":"Y","x":69.7,"y":39.3,"w":2.01,"h":2.2},{"id":"A10-B","room":"A10","label":"廁所","code":"B","x":61.99,"y":46.1,"w":2.01,"h":2.2},{"id":"A10-I","room":"A10","label":"臥室","code":"I","x":65.79,"y":46.9,"w":2.01,"h":2.2},{"id":"A10-Y","room":"A10","label":"陽台","code":"Y","x":69.7,"y":47,"w":2.01,"h":2.2},{"id":"A11-B","room":"A11","label":"廁所","code":"B","x":61.99,"y":53.3,"w":2.01,"h":2.2},{"id":"A11-I","room":"A11","label":"臥室","code":"I","x":65.79,"y":52.75,"w":2.01,"h":2.2},{"id":"A11-Y","room":"A11","label":"陽台","code":"Y","x":69.7,"y":52.1,"w":2.01,"h":2.2},{"id":"A12-B","room":"A12","label":"廁所","code":"B","x":62.89,"y":57.3,"w":2.01,"h":2.2},{"id":"A12-I1","room":"A12","label":"臥室二","code":"I","x":65.6,"y":57.95,"w":2.39,"h":2.2},{"id":"A12-I2","room":"A12","label":"客廳","code":"I","x":63.96,"y":62.3,"w":2.01,"h":2.2},{"id":"A12-K","room":"A12","label":"廚房","code":"K","x":67.2,"y":64.8,"w":2.01,"h":2.2},{"id":"A12-I3","room":"A12","label":"臥室一","code":"I","x":63.77,"y":67.3,"w":2.39,"h":2.2},{"id":"A12-Y","room":"A12","label":"陽台","code":"Y","x":67.2,"y":68.1,"w":2.01,"h":2.2},{"id":"A13-B","room":"A13","label":"廁所","code":"B","x":62.09,"y":77.1,"w":2.01,"h":2.2},{"id":"A13-I","room":"A13","label":"臥室","code":"I","x":65.79,"y":76.61,"w":2.01,"h":2.2},{"id":"A13-Y","room":"A13","label":"陽台","code":"Y","x":69.7,"y":75.2,"w":2.01,"h":2.2},{"id":"A14-I1","room":"A14","label":"臥室","code":"I","x":65.79,"y":81.73,"w":2.01,"h":2.2},{"id":"A14-I2","room":"A14","label":"客廳","code":"I","x":65.79,"y":85.84,"w":2.01,"h":2.2},{"id":"A14-B","room":"A14","label":"廁所","code":"B","x":62.09,"y":90.3,"w":2.01,"h":2.2},{"id":"A14-K","room":"A14","label":"廚房","code":"K","x":64.09,"y":90.3,"w":2.01,"h":2.2},{"id":"A14-I3","room":"A14","label":"臥室一","code":"I","x":66.94,"y":90.4,"w":2.39,"h":2.2},{"id":"A14-Y","room":"A14","label":"陽台","code":"Y","x":64.09,"y":94.1,"w":2.01,"h":2.2},{"id":"A15-B1","room":"A15","label":"廁所一","code":"B","x":57.2,"y":77,"w":2.01,"h":2.2},{"id":"A15-I1","room":"A15","label":"主臥室","code":"I","x":53.16,"y":77.78,"w":2.39,"h":2.2},{"id":"A15-I2","room":"A15","label":"臥室二","code":"I","x":53.16,"y":81.69,"w":2.39,"h":2.2},{"id":"A15-I3","room":"A15","label":"客廳","code":"I","x":55.57,"y":85.72,"w":2.01,"h":2.2},{"id":"A15-I4","room":"A15","label":"臥室一","code":"I","x":52.02,"y":90.4,"w":2.39,"h":2.2},{"id":"A15-B2","room":"A15","label":"廁所二","code":"B","x":55.2,"y":90.3,"w":2.01,"h":2.2},{"id":"A15-K","room":"A15","label":"廚房","code":"K","x":57.2,"y":90.3,"w":2.01,"h":2.2},{"id":"A15-Y","room":"A15","label":"陽台","code":"Y","x":56.2,"y":94.1,"w":2.01,"h":2.2},{"id":"A16-Y","room":"A16","label":"陽台","code":"Y","x":49.59,"y":73.5,"w":2.01,"h":2.2},{"id":"A16-I","room":"A16","label":"臥室","code":"I","x":53.35,"y":72.94,"w":2.01,"h":2.2},{"id":"A16-B","room":"A16","label":"廁所","code":"B","x":57.2,"y":72.1,"w":2.01,"h":2.2},{"id":"A17-I1","room":"A17","label":"臥室二","code":"I","x":53.16,"y":57.95,"w":2.39,"h":2.2},{"id":"A17-B","room":"A17","label":"廁所","code":"B","x":57.2,"y":57.3,"w":2.01,"h":2.2},{"id":"A17-I2","room":"A17","label":"客廳","code":"I","x":55.46,"y":62.62,"w":2.01,"h":2.2},{"id":"A17-K","room":"A17","label":"廚房","code":"K","x":52.2,"y":64.9,"w":2.01,"h":2.2},{"id":"A17-Y","room":"A17","label":"陽台","code":"Y","x":52.2,"y":67.9,"w":2.01,"h":2.2},{"id":"A17-I3","room":"A17","label":"臥室一","code":"I","x":55.41,"y":67.46,"w":2.39,"h":2.2},{"id":"A18-Y","room":"A18","label":"陽台","code":"Y","x":49.59,"y":52,"w":2.01,"h":2.2},{"id":"A18-I","room":"A18","label":"臥室","code":"I","x":53.35,"y":53.15,"w":2.01,"h":2.2},{"id":"A18-B","room":"A18","label":"廁所","code":"B","x":57.2,"y":53.3,"w":2.01,"h":2.2},{"id":"A19-Y","room":"A19","label":"陽台","code":"Y","x":49.59,"y":47.7,"w":2.01,"h":2.2},{"id":"A19-I","room":"A19","label":"臥室","code":"I","x":53.35,"y":46.82,"w":2.01,"h":2.2},{"id":"A19-B","room":"A19","label":"廁所","code":"B","x":57.2,"y":46.7,"w":2.01,"h":2.2},{"id":"A20-Y","room":"A20","label":"陽台","code":"Y","x":52.2,"y":31.5,"w":2.01,"h":2.2},{"id":"A20-I1","room":"A20","label":"臥室二","code":"I","x":55.67,"y":32.39,"w":2.39,"h":2.2},{"id":"A20-K","room":"A20","label":"廚房","code":"K","x":52.29,"y":34.7,"w":2.01,"h":2.2},{"id":"A20-I2","room":"A20","label":"客廳","code":"I","x":55.35,"y":37.19,"w":2.01,"h":2.2},{"id":"A20-I3","room":"A20","label":"臥室一","code":"I","x":53.16,"y":41.75,"w":2.39,"h":2.2},{"id":"A20-B","room":"A20","label":"廁所","code":"B","x":57.2,"y":42.4,"w":2.01,"h":2.2},{"id":"A21-B","room":"A21","label":"廁所","code":"B","x":47.09,"y":20.7,"w":2.01,"h":2.2},{"id":"A21-I","room":"A21","label":"臥室","code":"I","x":47.34,"y":25.38,"w":2.01,"h":2.2},{"id":"A21-Y","room":"A21","label":"陽台","code":"Y","x":46.2,"y":30.7,"w":2.01,"h":2.2},{"id":"A22-B","room":"A22","label":"廁所","code":"B","x":41.7,"y":20.7,"w":2.01,"h":2.2},{"id":"A22-I","room":"A22","label":"臥室","code":"I","x":42.29,"y":25.38,"w":2.01,"h":2.2},{"id":"A22-Y","room":"A22","label":"陽台","code":"Y","x":42.99,"y":30.7,"w":2.01,"h":2.2},{"id":"A23-B","room":"A23","label":"廁所","code":"B","x":30.7,"y":21.6,"w":2.01,"h":2.2},{"id":"A23-I1","room":"A23","label":"客廳","code":"I","x":34.82,"y":23.29,"w":2.01,"h":2.2},{"id":"A23-I2","room":"A23","label":"臥室一","code":"I","x":38.23,"y":23.08,"w":2.39,"h":2.2},{"id":"A23-I3","room":"A23","label":"臥室二","code":"I","x":31.1,"y":26.15,"w":2.39,"h":2.2},{"id":"A23-K","room":"A23","label":"廚房","code":"K","x":36.7,"y":27.2,"w":2.01,"h":2.2},{"id":"A23-Y","room":"A23","label":"陽台","code":"Y","x":38.99,"y":27.6,"w":2.01,"h":2.2},{"id":"A24-B","room":"A24","label":"廁所","code":"B","x":16.8,"y":20.7,"w":2.01,"h":2.2},{"id":"A24-I","room":"A24","label":"臥室","code":"I","x":17.13,"y":25.38,"w":2.01,"h":2.2},{"id":"A24-Y","room":"A24","label":"陽台","code":"Y","x":16.7,"y":30.7,"w":2.01,"h":2.2},{"id":"A25-K","room":"A25","label":"廚房","code":"K","x":3.29,"y":20.5,"w":2.01,"h":2.2},{"id":"A25-B1","room":"A25","label":"廁所一","code":"B","x":3.29,"y":23.9,"w":2.01,"h":2.2},{"id":"A25-Y","room":"A25","label":"陽台","code":"Y","x":0.7,"y":24.2,"w":2.01,"h":2.2},{"id":"A25-B2","room":"A25","label":"廁所二","code":"B","x":13.7,"y":21.7,"w":2.01,"h":2.2},{"id":"A25-I1","room":"A25","label":"客廳","code":"I","x":6.87,"y":24.01,"w":2.01,"h":2.2},{"id":"A25-I2","room":"A25","label":"臥室","code":"I","x":10.25,"y":25.86,"w":2.01,"h":2.2},{"id":"A25-I3","room":"A25","label":"主臥室","code":"I","x":13.03,"y":25.86,"w":2.39,"h":2.2},{"id":"A25-I4","room":"A25","label":"臥室一","code":"I","x":3.1,"y":27.4,"w":2.39,"h":2.2},{"id":"A26-I1","room":"A26","label":"臥室二","code":"I","x":3.1,"y":7.49,"w":2.39,"h":2.2},{"id":"A26-I2","room":"A26","label":"臥室一","code":"I","x":9.83,"y":9.5,"w":2.39,"h":2.2},{"id":"A26-I3","room":"A26","label":"主臥室","code":"I","x":12.97,"y":9.5,"w":2.39,"h":2.2},{"id":"A26-I4","room":"A26","label":"客廳","code":"I","x":7.07,"y":11.88,"w":2.01,"h":2.2},{"id":"A26-Y","room":"A26","label":"陽台","code":"Y","x":0.7,"y":12.7,"w":2.01,"h":2.2},{"id":"A26-B1","room":"A26","label":"廁所一","code":"B","x":3.29,"y":11.4,"w":2.01,"h":2.2},{"id":"A26-K","room":"A26","label":"廚房","code":"K","x":3.29,"y":14.4,"w":2.01,"h":2.2},{"id":"A26-B2","room":"A26","label":"廁所二","code":"B","x":13.8,"y":13.9,"w":2.01,"h":2.2},{"id":"A27-Y","room":"A27","label":"陽台","code":"Y","x":16.2,"y":4.3,"w":2.01,"h":2.2},{"id":"A27-I","room":"A27","label":"臥室","code":"I","x":16.79,"y":9.5,"w":2.01,"h":2.2},{"id":"A27-B","room":"A27","label":"廁所","code":"B","x":17.5,"y":13.8,"w":2.01,"h":2.2},{"id":"A28-Y","room":"A28","label":"陽台","code":"Y","x":20.3,"y":7.4,"w":2.01,"h":2.2},{"id":"A28-K","room":"A28","label":"廚房","code":"K","x":22.7,"y":7.4,"w":2.01,"h":2.2},{"id":"A28-I1","room":"A28","label":"臥室一","code":"I","x":20.59,"y":11.88,"w":2.39,"h":2.2},{"id":"A28-I2","room":"A28","label":"客廳","code":"I","x":24.05,"y":11.88,"w":2.01,"h":2.2},{"id":"A28-I3","room":"A28","label":"臥室二","code":"I","x":27.79,"y":9.5,"w":2.39,"h":2.2},{"id":"A28-B","room":"A28","label":"廁所","code":"B","x":28.3,"y":13.9,"w":2.01,"h":2.2},{"id":"A29-I1","room":"A29","label":"臥室二","code":"I","x":30.7,"y":9.5,"w":2.39,"h":2.2},{"id":"A29-B","room":"A29","label":"廁所","code":"B","x":30.39,"y":13.8,"w":2.01,"h":2.2},{"id":"A29-K","room":"A29","label":"廚房","code":"K","x":35.89,"y":7.5,"w":2.01,"h":2.2},{"id":"A29-Y","room":"A29","label":"陽台","code":"Y","x":38.2,"y":7.5,"w":2.01,"h":2.2},{"id":"A29-I2","room":"A29","label":"客廳","code":"I","x":34.54,"y":11.88,"w":2.01,"h":2.2},{"id":"A29-I3","room":"A29","label":"臥室一","code":"I","x":37.69,"y":11.88,"w":2.39,"h":2.2},{"id":"A30-I1","room":"A30","label":"臥室二","code":"I","x":40.94,"y":9.5,"w":2.39,"h":2.2},{"id":"A30-B","room":"A30","label":"廁所","code":"B","x":40.39,"y":13.8,"w":2.01,"h":2.2},{"id":"A30-K","room":"A30","label":"廚房","code":"K","x":45.99,"y":7.5,"w":2.01,"h":2.2},{"id":"A30-Y","room":"A30","label":"陽台","code":"Y","x":48.29,"y":7.5,"w":2.01,"h":2.2},{"id":"A30-I2","room":"A30","label":"客廳","code":"I","x":44.46,"y":11.88,"w":2.01,"h":2.2},{"id":"A30-I3","room":"A30","label":"臥室一","code":"I","x":47.77,"y":11.88,"w":2.39,"h":2.2},{"id":"A31-Y1","room":"A31","label":"陽台","code":"Y","x":52.09,"y":6.1,"w":2.01,"h":2.2},{"id":"A31-I","room":"A31","label":"臥室","code":"I","x":52.79,"y":9.7,"w":2.01,"h":2.2},{"id":"A31-B","room":"A31","label":"廁所","code":"B","x":52.2,"y":14.3,"w":2.01,"h":2.2}];
+
+const SPACE_COLORS = { I:'#4a83ff', B:'#2fc4d4', K:'#f0a94a', Y:'#2fbf87', 廊:'#b57ce0', 廳:'#4a83ff' };
+const OTHER_COLOR = '#b57ce0';
+
+const state = {
+  image: null,
+  imageName: '',
+  regions: [],
+  selectedId: null,
+  mode: 'select',
+  view: { zoom: 1, panX: 0, panY: 0 },
+  source: [],
+  sourceName: '',
+  history: [],
+};
+
+let drag = null;      // 進行中的拖曳
+let draftPoly = null; // 進行中的多邊形
+let spaceHeld = false;
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+/* ---------------- 共用小工具 ---------------- */
+
+const clean = (v) => String(v ?? '').trim();
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+function toast(message, error = false) {
+  const el = document.getElementById('toast');
+  el.textContent = message;
+  el.className = 'toast' + (error ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+/** 與主系統 app.js 的 spaceCode() 完全相同，確保匯出後對得上 */
+function spaceCode(value) {
+  const text = clean(typeof value === 'object' ? value.code || value.label : value);
+  if (['B','K','I','Y','廊','廳'].includes(text)) return text;
+  if (/廁所/.test(text)) return 'B';
+  if (/廚房/.test(text)) return 'K';
+  if (/陽台/.test(text)) return 'Y';
+  if (/室內|臥室|主臥|客廳/.test(text)) return 'I';
+  if (/走廊/.test(text)) return '廊';
+  return text;
+}
+
+/* ================= 幾何工具 ================= */
+
+function pointInPoly(px, py, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function pointSegDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function distToEdges(px, py, pts) {
+  let min = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    min = Math.min(min, pointSegDist(px, py, pts[j][0], pts[j][1], pts[i][0], pts[i][1]));
+  }
+  return min;
+}
+
+/**
+ * 多邊形的標籤位置：取「內部離邊界最遠的點」（pole of inaccessibility）。
+ * 凹形（例如 L 形客廳）用頂點平均會落在形狀外面，這個做法不會。
+ */
+function polygonLabelPoint(pts) {
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  let best = null;
+
+  const scan = (x0, x1, y0, y1, steps) => {
+    const sx = (x1 - x0) / steps;
+    const sy = (y1 - y0) / steps;
+    for (let i = 0; i <= steps; i += 1) {
+      for (let j = 0; j <= steps; j += 1) {
+        const x = x0 + i * sx;
+        const y = y0 + j * sy;
+        if (!pointInPoly(x, y, pts)) continue;
+        const d = distToEdges(x, y, pts);
+        if (!best || d > best.d) best = { x, y, d };
+      }
+    }
+  };
+
+  scan(minX, maxX, minY, maxY, 26);
+  if (!best) return [(minX + maxX) / 2, (minY + maxY) / 2];
+  const r = Math.max(maxX - minX, maxY - minY) / 26;
+  scan(best.x - r, best.x + r, best.y - r, best.y + r, 10);
+  return [best.x, best.y];
+}
+
+/** 標籤位置：手動拖過就用手動的，否則自動算並快取 */
+function labelPointOf(region) {
+  if (region.labelPos) return region.labelPos;
+  if (region.shape === 'rect') return [region.x + region.w / 2, region.y + region.h / 2];
+  if (!region._label) region._label = polygonLabelPoint(region.points);
+  return region._label;
+}
+
+function invalidateLabel(region) {
+  if (region) delete region._label;
+}
+
+/** Ramer–Douglas–Peucker：把上千點的輪廓縮成可以手動調的節點數 */
+function simplifyPath(points, epsilon) {
+  if (points.length < 3) return points.slice();
+  const [x1, y1] = points[0];
+  const [x2, y2] = points[points.length - 1];
+  let maxDist = -1;
+  let index = 0;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const d = pointSegDist(points[i][0], points[i][1], x1, y1, x2, y2);
+    if (d > maxDist) { maxDist = d; index = i; }
+  }
+  if (maxDist > epsilon) {
+    const left = simplifyPath(points.slice(0, index + 1), epsilon);
+    const right = simplifyPath(points.slice(index), epsilon);
+    return left.slice(0, -1).concat(right);
+  }
+  return [[x1, y1], [x2, y2]];
+}
+
+const regionColor = (r) => SPACE_COLORS[r.code] || OTHER_COLOR;
+const imgW = () => state.image?.naturalWidth || 1;
+const imgH = () => state.image?.naturalHeight || 1;
+const byId = (id) => state.regions.find((r) => r.id === id);
+const selected = () => (state.selectedId ? byId(state.selectedId) : null);
+
+function newId(room, label) {
+  const base = `${room || 'NEW'}-${label || 'X'}`.replace(/\s+/g, '');
+  let id = base;
+  let n = 2;
+  while (state.regions.some((r) => r.id === id)) id = `${base}#${n++}`;
+  return id;
+}
+
+function snapshot() {
+  state.history.push(JSON.stringify(state.regions));
+  if (state.history.length > 60) state.history.shift();
+}
+
+function undo() {
+  const previous = state.history.pop();
+  if (!previous) return toast('沒有可復原的動作', true);
+  state.regions = JSON.parse(previous);
+  if (!byId(state.selectedId)) state.selectedId = null;
+  refresh();
+}
+
+/* ---------------- 座標換算 ---------------- */
+
+function toScreen(px, py) {
+  const { zoom, panX, panY } = state.view;
+  return [panX + (px / 100) * imgW() * zoom, panY + (py / 100) * imgH() * zoom];
+}
+
+function toPct(sx, sy) {
+  const { zoom, panX, panY } = state.view;
+  return [((sx - panX) / (imgW() * zoom)) * 100, ((sy - panY) / (imgH() * zoom)) * 100];
+}
+
+function mousePos(event) {
+  const box = cv.getBoundingClientRect();
+  return [event.clientX - box.left, event.clientY - box.top];
+}
+
+/* ---------------- 命中判定 ---------------- */
+
+function rectOf(r) {
+  if (r.shape === 'rect') return { x: r.x, y: r.y, w: r.w, h: r.h };
+  const xs = r.points.map((p) => p[0]);
+  const ys = r.points.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+function insideRegion(r, px, py) {
+  if (r.shape === 'rect') {
+    return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  }
+  // 射線法
+  let inside = false;
+  const pts = r.points;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function regionAt(px, py) {
+  for (let i = state.regions.length - 1; i >= 0; i -= 1) {
+    if (insideRegion(state.regions[i], px, py)) return state.regions[i];
+  }
+  return null;
+}
+
+/* ---------------- 繪製 ---------------- */
+
+function resizeCanvas() {
+  const stage = document.getElementById('stage');
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.round(stage.clientWidth * dpr));
+  cv.height = Math.max(1, Math.round(stage.clientHeight * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cv.width / dpr, cv.height / dpr);
+  if (!state.image) return;
+
+  const { zoom, panX, panY } = state.view;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(state.image, panX, panY, imgW() * zoom, imgH() * zoom);
+
+  for (const r of state.regions) drawRegion(r, r.id === state.selectedId);
+  if (draftPoly) drawDraftPoly();
+  if (drag?.type === 'newrect') drawDraftRect();
+  drawStatus();
+}
+
+function regionPathScreen(r) {
+  ctx.beginPath();
+  if (r.shape === 'rect') {
+    const [x1, y1] = toScreen(r.x, r.y);
+    const [x2, y2] = toScreen(r.x + r.w, r.y + r.h);
+    ctx.rect(x1, y1, x2 - x1, y2 - y1);
+  } else {
+    r.points.forEach(([px, py], i) => {
+      const [sx, sy] = toScreen(px, py);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+  }
+}
+
+function drawRegion(r, isSelected) {
+  const color = regionColor(r);
+  const named = Boolean(clean(r.room) && clean(r.label));
+
+  regionPathScreen(r);
+  ctx.fillStyle = hexA(color, isSelected ? 0.46 : 0.26);
+  ctx.fill();
+  ctx.lineWidth = isSelected ? 2.5 : 1.4;
+  ctx.strokeStyle = named ? color : '#f2726b';
+  ctx.setLineDash(named ? [] : [5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 文字：夠大才畫，避免縮小時糊成一團
+  const box = rectOf(r);
+  const [bx, by] = toScreen(box.x, box.y);
+  const [ex, ey] = toScreen(box.x + box.w, box.y + box.h);
+  const boxW = ex - bx;
+  const boxH = ey - by;
+  if (boxW > 34 && boxH > 20) {
+    const size = Math.max(9, Math.min(15, boxH * 0.34));
+    ctx.font = `700 ${size}px "Microsoft JhengHei",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const [lx, ly] = labelPointOf(r);
+    const [cx, cy] = toScreen(lx, ly);
+    const lines = named ? [r.room, r.label] : ['未命名'];
+    lines.forEach((text, i) => {
+      const y = cy + (i - (lines.length - 1) / 2) * (size * 1.12);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#0b1524cc';
+      ctx.strokeText(text, cx, y);
+      ctx.fillStyle = named ? '#fff' : '#ffd7d4';
+      ctx.fillText(text, cx, y);
+    });
+    if (r.labelPos && isSelected) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * 1.5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffffff66';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  if (isSelected) drawHandles(r);
+}
+
+function drawHandles(r) {
+  const points = r.shape === 'rect'
+    ? [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]
+    : r.points;
+
+  // 多邊形：每段邊的中點畫空心點，按下去就在那裡加一個節點
+  if (r.shape === 'poly') {
+    ctx.strokeStyle = '#ffffffcc';
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i < r.points.length; i += 1) {
+      const [mx, my] = edgeMidpoint(r, i);
+      const [sx, sy] = toScreen(mx, my);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3.6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#2f69e8';
+  ctx.lineWidth = 2;
+  for (const [px, py] of points) {
+    const [sx, sy] = toScreen(px, py);
+    ctx.beginPath();
+    ctx.rect(sx - 4.5, sy - 4.5, 9, 9);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** 第 i 段邊（points[i] → points[i+1]）的中點 */
+function edgeMidpoint(r, i) {
+  const a = r.points[i];
+  const b = r.points[(i + 1) % r.points.length];
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+}
+
+/** 選取區域上被按到的控制點：頂點 / 邊中點 / 文字 */
+function handleAt(sx, sy) {
+  const r = selected();
+  if (!r) return null;
+  const R = 8;
+  const near = (hx, hy, radius = R) => Math.abs(sx - hx) <= radius && Math.abs(sy - hy) <= radius;
+
+  // 文字優先，才拖得動壓在頂點附近的標籤
+  if (clean(r.room) || clean(r.label)) {
+    const [lx, ly] = labelPointOf(r);
+    const [tx, ty] = toScreen(lx, ly);
+    if (near(tx, ty, 16)) return { type: 'label' };
+  }
+
+  if (r.shape === 'rect') {
+    const corners = [['nw', r.x, r.y], ['ne', r.x + r.w, r.y], ['sw', r.x, r.y + r.h], ['se', r.x + r.w, r.y + r.h]];
+    for (const [name, px, py] of corners) {
+      const [hx, hy] = toScreen(px, py);
+      if (near(hx, hy)) return { type: 'corner', corner: name };
+    }
+    return null;
+  }
+
+  for (let i = 0; i < r.points.length; i += 1) {
+    const [hx, hy] = toScreen(r.points[i][0], r.points[i][1]);
+    if (near(hx, hy)) return { type: 'vertex', index: i };
+  }
+  for (let i = 0; i < r.points.length; i += 1) {
+    const [mx, my] = edgeMidpoint(r, i);
+    const [hx, hy] = toScreen(mx, my);
+    if (near(hx, hy, 7)) return { type: 'insert', index: i };
+  }
+  return null;
+}
+
+/** 在第 i 段邊的中點插入節點，並立刻進入拖曳 */
+function insertVertex(r, i) {
+  const [mx, my] = edgeMidpoint(r, i);
+  r.points.splice(i + 1, 0, [mx, my]);
+  invalidateLabel(r);
+  return i + 1;
+}
+
+function deleteVertex(r, i) {
+  if (r.shape !== 'poly') return;
+  if (r.points.length <= 3) return toast('多邊形至少要保留 3 個節點', true);
+  snapshot();
+  r.points.splice(i, 1);
+  invalidateLabel(r);
+  draw();
+  toast('已刪除節點');
+}
+
+function resetLabelPos() {
+  const r = selected();
+  if (!r) return;
+  snapshot();
+  delete r.labelPos;
+  invalidateLabel(r);
+  draw();
+  toast('文字位置已重設為自動置中');
+}
+
+function drawDraftRect() {
+  const [x1, y1] = toScreen(Math.min(drag.from[0], drag.to[0]), Math.min(drag.from[1], drag.to[1]));
+  const [x2, y2] = toScreen(Math.max(drag.from[0], drag.to[0]), Math.max(drag.from[1], drag.to[1]));
+  ctx.fillStyle = 'rgba(74,131,255,.28)';
+  ctx.strokeStyle = '#4a83ff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+  ctx.setLineDash([]);
+}
+
+function drawDraftPoly() {
+  ctx.strokeStyle = '#4a83ff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  draftPoly.points.forEach(([px, py], i) => {
+    const [sx, sy] = toScreen(px, py);
+    if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+  });
+  if (draftPoly.cursor) {
+    const [sx, sy] = toScreen(draftPoly.cursor[0], draftPoly.cursor[1]);
+    ctx.lineTo(sx, sy);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#fff';
+  for (const [px, py] of draftPoly.points) {
+    const [sx, sy] = toScreen(px, py);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function hexA(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function drawStatus() {
+  const el = document.getElementById('status');
+  if (!state.image) { el.textContent = ''; return; }
+  const named = state.regions.filter((r) => clean(r.room) && clean(r.label)).length;
+  el.innerHTML = `<b>${esc(state.imageName)}</b>　${imgW()}×${imgH()} px<br>`
+    + `區域 <b>${state.regions.length}</b> 個　已命名 <b>${named}</b>　未命名 <b>${state.regions.length - named}</b>`
+    + (state.sourceName ? `<br>數量明細 <b>${esc(state.sourceName)}</b>（${state.source.length} 筆）` : '');
+}
+
+/* ---------------- 視圖 ---------------- */
+
+function fitView() {
+  if (!state.image) return;
+  const stage = document.getElementById('stage');
+  const zoom = Math.min(stage.clientWidth / imgW(), stage.clientHeight / imgH()) * 0.96;
+  state.view.zoom = zoom;
+  state.view.panX = (stage.clientWidth - imgW() * zoom) / 2;
+  state.view.panY = (stage.clientHeight - imgH() * zoom) / 2;
+  updateZoomLabel();
+  draw();
+}
+
+function zoomBy(factor, anchor) {
+  if (!state.image) return;
+  const stage = document.getElementById('stage');
+  const [ax, ay] = anchor || [stage.clientWidth / 2, stage.clientHeight / 2];
+  const before = toPct(ax, ay);
+  state.view.zoom = Math.max(0.05, Math.min(12, state.view.zoom * factor));
+  const [nx, ny] = toScreen(before[0], before[1]);
+  state.view.panX += ax - nx;
+  state.view.panY += ay - ny;
+  updateZoomLabel();
+  draw();
+}
+
+function updateZoomLabel() {
+  document.getElementById('zoomLabel').textContent = `${Math.round(state.view.zoom * 100)}%`;
+}
+
+/* ---------------- 模式 ---------------- */
+
+function setMode(mode) {
+  state.mode = mode;
+  draftPoly = null;
+  ['select', 'rect', 'poly', 'pan', 'detect'].forEach((m) => {
+    document.getElementById(`m-${m}`).classList.toggle('on', m === mode);
+  });
+  cv.style.cursor = mode === 'pan' ? 'grab' : (mode === 'select' ? 'default' : 'crosshair');
+  document.getElementById('tolWrap').classList.toggle('hidden', mode !== 'detect');
+  draw();
+}
+
+/* ---------------- 滑鼠 ---------------- */
+
+cv.addEventListener('mousedown', (event) => {
+  if (!state.image) return;
+  const [sx, sy] = mousePos(event);
+  const [px, py] = toPct(sx, sy);
+
+  if (state.mode === 'pan' || spaceHeld || event.button === 1) {
+    drag = { type: 'pan', sx, sy, panX: state.view.panX, panY: state.view.panY };
+    cv.style.cursor = 'grabbing';
+    return;
+  }
+
+  if (state.mode === 'rect') {
+    drag = { type: 'newrect', from: [px, py], to: [px, py] };
+    return;
+  }
+
+  if (state.mode === 'detect') {
+    autoDetect(px, py);
+    return;
+  }
+
+  if (state.mode === 'poly') {
+    if (!draftPoly) draftPoly = { points: [], cursor: null };
+    draftPoly.points.push([px, py]);
+    draw();
+    return;
+  }
+
+  // 選取模式
+  const handle = handleAt(sx, sy);
+  if (handle) {
+    const r = selected();
+    // Alt + 點頂點＝刪掉那個節點
+    if (handle.type === 'vertex' && event.altKey) { deleteVertex(r, handle.index); return; }
+    snapshot();
+    if (handle.type === 'insert') {
+      const index = insertVertex(r, handle.index);
+      drag = { type: 'vertex', index, start: [px, py], origin: JSON.parse(JSON.stringify(r)) };
+      draw();
+      return;
+    }
+    drag = { type: handle.type, ...handle, start: [px, py], origin: JSON.parse(JSON.stringify(r)) };
+    return;
+  }
+  const hit = regionAt(px, py);
+  if (hit) {
+    selectRegion(hit.id);
+    snapshot();
+    drag = { type: 'move', start: [px, py], origin: JSON.parse(JSON.stringify(hit)) };
+  } else {
+    selectRegion(null);
+    drag = { type: 'pan', sx, sy, panX: state.view.panX, panY: state.view.panY };
+  }
+});
+
+cv.addEventListener('mousemove', (event) => {
+  if (!state.image) return;
+  const [sx, sy] = mousePos(event);
+  const [px, py] = toPct(sx, sy);
+
+  if (draftPoly) { draftPoly.cursor = [px, py]; draw(); return; }
+  if (!drag) return;
+
+  if (drag.type === 'pan') {
+    state.view.panX = drag.panX + (sx - drag.sx);
+    state.view.panY = drag.panY + (sy - drag.sy);
+    draw();
+    return;
+  }
+  if (drag.type === 'newrect') { drag.to = [px, py]; draw(); return; }
+
+  const r = selected();
+  if (!r) return;
+  const dx = px - drag.start[0];
+  const dy = py - drag.start[1];
+
+  if (drag.type === 'label') {
+    r.labelPos = [px, py];
+    draw();
+    return;
+  }
+  if (drag.type === 'move') {
+    if (r.shape === 'rect') { r.x = drag.origin.x + dx; r.y = drag.origin.y + dy; }
+    else r.points = drag.origin.points.map(([ox, oy]) => [ox + dx, oy + dy]);
+    if (drag.origin.labelPos) r.labelPos = [drag.origin.labelPos[0] + dx, drag.origin.labelPos[1] + dy];
+    invalidateLabel(r);
+  } else if (drag.type === 'vertex') {
+    r.points[drag.index] = [px, py];
+    invalidateLabel(r);
+  } else if (drag.type === 'corner') {
+    const o = drag.origin;
+    let x1 = o.x;
+    let y1 = o.y;
+    let x2 = o.x + o.w;
+    let y2 = o.y + o.h;
+    if (drag.corner.includes('n')) y1 = py; else y2 = py;
+    if (drag.corner.includes('w')) x1 = px; else x2 = px;
+    r.x = Math.min(x1, x2); r.y = Math.min(y1, y2);
+    r.w = Math.abs(x2 - x1); r.h = Math.abs(y2 - y1);
+  }
+  draw();
+});
+
+window.addEventListener('mouseup', () => {
+  if (drag?.type === 'newrect') {
+    const [x1, y1] = drag.from;
+    const [x2, y2] = drag.to;
+    const w = Math.abs(x2 - x1);
+    const h = Math.abs(y2 - y1);
+    if (w > 0.25 && h > 0.25) {
+      snapshot();
+      const region = { id: newId('', ''), room: '', label: '', code: '', shape: 'rect',
+        x: +Math.min(x1, x2).toFixed(3), y: +Math.min(y1, y2).toFixed(3), w: +w.toFixed(3), h: +h.toFixed(3) };
+      state.regions.push(region);
+      selectRegion(region.id);
+      setMode('select');
+      document.getElementById('pRoom').focus();
+    }
+  }
+  if (drag && ['move', 'vertex', 'corner'].includes(drag.type)) refreshSidePanel();
+  drag = null;
+  if (state.mode === 'pan') cv.style.cursor = 'grab';
+  draw();
+});
+
+cv.addEventListener('dblclick', (event) => {
+  if (draftPoly && draftPoly.points.length >= 3) return finishPoly();
+  if (state.mode !== 'select' || !state.image) return;
+  const [sx, sy] = mousePos(event);
+  const [px, py] = toPct(sx, sy);
+  // 點兩下空白處＝自動框出那個空間
+  if (!regionAt(px, py)) autoDetect(px, py);
+});
+
+cv.addEventListener('wheel', (event) => {
+  if (!state.image) return;
+  event.preventDefault();
+  zoomBy(event.deltaY < 0 ? 1.14 : 1 / 1.14, mousePos(event));
+}, { passive: false });
+
+function finishPoly() {
+  snapshot();
+  const region = { id: newId('', ''), room: '', label: '', code: '', shape: 'poly',
+    points: draftPoly.points.map(([x, y]) => [+x.toFixed(3), +y.toFixed(3)]) };
+  state.regions.push(region);
+  draftPoly = null;
+  selectRegion(region.id);
+  setMode('select');
+  document.getElementById('pRoom').focus();
+}
+
+/* ---------------- 鍵盤 ---------------- */
+
+window.addEventListener('keydown', (event) => {
+  const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName);
+  if (event.code === 'Space' && !typing) { spaceHeld = true; cv.style.cursor = 'grab'; event.preventDefault(); }
+  if (typing) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); return; }
+  if (event.key === 'Escape') { draftPoly = null; selectRegion(null); draw(); return; }
+  if (event.key === 'Enter' && draftPoly?.points.length >= 3) { finishPoly(); return; }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedId) { event.preventDefault(); deleteSelected(); return; }
+  const keys = { v: 'select', r: 'rect', p: 'poly', h: 'pan', a: 'detect' };
+  if (keys[event.key.toLowerCase()]) setMode(keys[event.key.toLowerCase()]);
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.code === 'Space') { spaceHeld = false; cv.style.cursor = state.mode === 'pan' ? 'grab' : (state.mode === 'select' ? 'default' : 'crosshair'); }
+});
+
+window.addEventListener('resize', resizeCanvas);
+
+/* ================= 自動偵測空間輪廓 ================= */
+
+let detectData = null;   // 縮小後的像素資料，供漫填使用
+
+/** 把平面圖縮到最寬 1400px 再取像素，速度差很多，精度對這個用途夠 */
+function ensureDetectData() {
+  if (detectData) return detectData;
+  const scale = Math.min(1, 1400 / imgW());
+  const width = Math.max(1, Math.round(imgW() * scale));
+  const height = Math.max(1, Math.round(imgH() * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const c2d = canvas.getContext('2d', { willReadFrequently: true });
+  c2d.drawImage(state.image, 0, 0, width, height);
+  detectData = { data: c2d.getImageData(0, 0, width, height).data, width, height };
+  return detectData;
+}
+
+/** 掃描線漫填：從點到的像素往外擴散，遇到牆線（顏色差太多）就停 */
+function floodFill(px, py, tolerance) {
+  const { data, width, height } = ensureDetectData();
+  const sx = Math.min(width - 1, Math.max(0, Math.round((px / 100) * width)));
+  const sy = Math.min(height - 1, Math.max(0, Math.round((py / 100) * height)));
+  const seed = (sy * width + sx) * 4;
+  const sr = data[seed];
+  const sg = data[seed + 1];
+  const sb = data[seed + 2];
+  const limit = tolerance * tolerance * 3;
+
+  const mask = new Uint8Array(width * height);
+  const match = (x, y) => {
+    const i = (y * width + x) * 4;
+    const dr = data[i] - sr;
+    const dg = data[i + 1] - sg;
+    const db = data[i + 2] - sb;
+    return dr * dr + dg * dg + db * db <= limit;
+  };
+  if (!match(sx, sy)) return null;
+
+  let filled = 0;
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    const [x0, y] = stack.pop();
+    if (mask[y * width + x0]) continue;
+    let left = x0;
+    while (left > 0 && !mask[y * width + left - 1] && match(left - 1, y)) left -= 1;
+    let right = x0;
+    while (right < width - 1 && !mask[y * width + right + 1] && match(right + 1, y)) right += 1;
+    for (let x = left; x <= right; x += 1) {
+      mask[y * width + x] = 1;
+      filled += 1;
+      if (y > 0 && !mask[(y - 1) * width + x] && match(x, y - 1)) stack.push([x, y - 1]);
+      if (y < height - 1 && !mask[(y + 1) * width + x] && match(x, y + 1)) stack.push([x, y + 1]);
+    }
+  }
+  return { mask, width, height, filled };
+}
+
+/** 形態學閉運算：先膨脹再侵蝕，把房間裡的家具細線接起來，牆線太厚不會被跨過 */
+function closeMask(mask, width, height, radius) {
+  const dilate = (input) => {
+    const out = new Uint8Array(input.length);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (!input[y * width + x]) continue;
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            out[ny * width + nx] = 1;
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const erode = (input) => {
+    const out = new Uint8Array(input.length);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let keep = 1;
+        for (let dy = -radius; dy <= radius && keep; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) { keep = 0; break; }
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width || !input[ny * width + nx]) { keep = 0; break; }
+          }
+        }
+        out[y * width + x] = keep;
+      }
+    }
+    return out;
+  };
+  return erode(dilate(mask));
+}
+
+/** Moore 鄰域輪廓追蹤：沿著填色區域的外緣走一圈 */
+function traceOutline(mask, width, height) {
+  let start = -1;
+  for (let i = 0; i < mask.length; i += 1) { if (mask[i]) { start = i; break; } }
+  if (start < 0) return null;
+
+  const sx = start % width;
+  const sy = Math.floor(start / width);
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  const solid = (x, y) => x >= 0 && y >= 0 && x < width && y < height && mask[y * width + x] === 1;
+
+  const path = [[sx, sy]];
+  let cx = sx;
+  let cy = sy;
+  let dir = 6;
+  const maxSteps = Math.min(400000, (width + height) * 8);
+  for (let step = 0; step < maxSteps; step += 1) {
+    let moved = false;
+    for (let k = 0; k < 8; k += 1) {
+      const d = (dir + 5 + k) % 8;
+      const nx = cx + dirs[d][0];
+      const ny = cy + dirs[d][1];
+      if (solid(nx, ny)) { cx = nx; cy = ny; dir = d; path.push([cx, cy]); moved = true; break; }
+    }
+    if (!moved) break;
+    if (cx === sx && cy === sy) break;
+  }
+  return path.length >= 4 ? path : null;
+}
+
+/** 點兩下自動框出空間：漫填 → 補洞 → 追輪廓 → 簡化成可手動調的節點 */
+function autoDetect(px, py) {
+  if (!state.image) return toast('請先開啟平面圖', true);
+  const tolerance = Math.max(2, Math.min(120, Number(document.getElementById('tol').value) || 30));
+
+  let result;
+  try {
+    result = floodFill(px, py, tolerance);
+  } catch (error) {
+    return toast(`偵測失敗：${error.message}`, true);
+  }
+  if (!result) return toast('這個位置抓不到顏色，請點在空間內部的空白處', true);
+
+  const total = result.width * result.height;
+  if (result.filled < 60) {
+    return toast(`範圍太小（${result.filled} px），把容差調大一點再試`, true);
+  }
+  if (result.filled > total * 0.35) {
+    return toast('顏色擴散到整張圖了，請把容差調小再試（牆線可能有缺口）', true);
+  }
+
+  const closed = closeMask(result.mask, result.width, result.height, 2);
+  const outline = traceOutline(closed, result.width, result.height);
+  if (!outline) return toast('抓不到輪廓，請改用畫矩形或多邊形', true);
+
+  // 上千點先抽稀再做 RDP，避免遞迴太深
+  const step = Math.max(1, Math.floor(outline.length / 1200));
+  const sampled = outline.filter((_, i) => i % step === 0);
+
+  let epsilon = Math.max(result.width, result.height) * 0.004;
+  let simplified = simplifyPath(sampled, epsilon);
+  for (let i = 0; i < 6 && simplified.length > 48; i += 1) {
+    epsilon *= 1.7;
+    simplified = simplifyPath(sampled, epsilon);
+  }
+  if (simplified.length < 3) return toast('輪廓過於單純，請改用畫矩形', true);
+
+  const points = simplified.map(([x, y]) => [
+    +((x / result.width) * 100).toFixed(3),
+    +((y / result.height) * 100).toFixed(3),
+  ]);
+
+  snapshot();
+  const region = { id: newId('', ''), room: '', label: '', code: '', shape: 'poly', points };
+  state.regions.push(region);
+  selectRegion(region.id);
+  setMode('select');
+  document.getElementById('pRoom').focus();
+  toast(`已框出 ${points.length} 個節點。不滿意就拖節點，或點邊線中間的空心點加節點。`);
+}
+
+/* ---------------- 檔案 ---------------- */
+
+function loadImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const image = new Image();
+  image.onload = () => {
+    state.image = image;
+    state.imageName = file.name;
+    document.getElementById('hint').classList.add('hidden');
+    fitView();
+    refresh();
+    toast(`已載入 ${file.name}（${image.naturalWidth}×${image.naturalHeight}）`);
+  };
+  image.onerror = () => toast('圖片讀取失敗', true);
+  image.src = URL.createObjectURL(file);
+  event.target.value = '';
+}
+
+function seedFromBuiltin() {
+  if (!state.image) return toast('請先開啟平面圖', true);
+  if (state.regions.length && !confirm(`目前已有 ${state.regions.length} 個區域，載入標號會全部取代。要繼續嗎？`)) return;
+  snapshot();
+  state.regions = SEED.map((s) => ({
+    id: s.id, room: s.room, label: s.label, code: s.code,
+    shape: 'rect', x: s.x, y: s.y, w: s.w, h: s.h,
+  }));
+  state.selectedId = null;
+  refresh();
+  toast(`已載入 ${state.regions.length} 個現有標號，接下來把每個框拉到實際空間範圍即可`);
+}
+
+function loadSource(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      if (typeof XLSX === 'undefined') throw new Error('找不到 xlsx.full.min.js，請確認它和本檔在同一個資料夾（或 assets 子資料夾）內');
+      const workbook = XLSX.read(new Uint8Array(reader.result), { type: 'array' });
+      const sheetName = workbook.SheetNames.find((n) => n.trim() === '數量明細表');
+      if (!sheetName) throw new Error('找不到「數量明細表」工作表');
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: null, raw: true });
+      state.source = rows.slice(5)
+        .map((row, index) => ({ row, rowNumber: index + 6 }))
+        .filter(({ row }) => row[0] != null && row[1] != null && row[2] != null)
+        .map(({ row, rowNumber }) => ({
+          rowNumber,
+          floor: clean(row[0]).replace(/F$/i, ''),
+          room: `A${clean(row[1]).replace(/^A/i, '').padStart(2, '0')}`,
+          space: clean(row[2]),
+          position: clean(row[3]),
+          area: Number.parseFloat(String(row[5] ?? '').replace(/,/g, '')) || 0,
+        }));
+      state.sourceName = file.name;
+      refresh();
+      toast(`已匯入 ${state.source.length} 筆數量明細，右側檢核已更新`);
+    } catch (error) {
+      toast(`匯入失敗：${error.message}`, true);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+function loadProject(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data.regions)) throw new Error('檔案裡沒有 regions');
+      snapshot();
+      state.regions = data.regions.map((r) => ({
+        id: r.id, room: r.room || '', label: r.label || '', code: r.code || spaceCode(r.label),
+        shape: r.shape === 'poly' ? 'poly' : 'rect',
+        ...(r.shape === 'poly' ? { points: r.points } : { x: r.x, y: r.y, w: r.w, h: r.h }),
+        ...(Number.isFinite(r.labelX) && Number.isFinite(r.labelY) ? { labelPos: [r.labelX, r.labelY] } : {}),
+      }));
+      state.selectedId = null;
+      refresh();
+      toast(`已開啟設定檔，共 ${state.regions.length} 個區域`);
+    } catch (error) {
+      toast(`開啟失敗：${error.message}`, true);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function exportProject() {
+  if (!state.regions.length) return toast('還沒有任何區域可以匯出', true);
+  const unnamed = state.regions.filter((r) => !clean(r.room) || !clean(r.label));
+  if (unnamed.length && !confirm(`還有 ${unnamed.length} 個區域沒有填房號或空間，這些會被略過不匯出。要繼續嗎？`)) return;
+
+  const payload = {
+    version: 1,
+    generator: '東仁安居平面圖區域編輯器',
+    createdAt: new Date().toISOString(),
+    image: { name: state.imageName, width: imgW(), height: imgH() },
+    unit: 'percent',
+    regions: state.regions
+      .filter((r) => clean(r.room) && clean(r.label))
+      .map((r) => {
+        const [labelX, labelY] = labelPointOf(r);
+        return {
+        id: r.id, room: clean(r.room), label: clean(r.label), code: spaceCode(r.label),
+        shape: r.shape,
+        labelX: +labelX.toFixed(3), labelY: +labelY.toFixed(3),
+        ...(r.shape === 'poly'
+          ? { points: r.points.map(([x, y]) => [+x.toFixed(3), +y.toFixed(3)]) }
+          : { x: +r.x.toFixed(3), y: +r.y.toFixed(3), w: +r.w.toFixed(3), h: +r.h.toFixed(3) }),
+        };
+      }),
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'floor-plan-regions.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`已匯出 ${payload.regions.length} 個區域到 floor-plan-regions.json`);
+}
+
+/* ---------------- 側欄 ---------------- */
+
+function selectRegion(id) {
+  state.selectedId = id;
+  refreshSidePanel();
+  renderList();
+  draw();
+}
+
+function deleteSelected() {
+  const r = selected();
+  if (!r) return;
+  snapshot();
+  state.regions = state.regions.filter((x) => x.id !== r.id);
+  state.selectedId = null;
+  refresh();
+}
+
+function updateProp() {
+  const r = selected();
+  if (!r) return;
+  r.room = document.getElementById('pRoom').value;
+  r.label = document.getElementById('pLabel').value;
+  r.code = spaceCode(r.label);
+  document.getElementById('pCode').innerHTML = r.code
+    ? `<span class="chip ${['I','B','K','Y'].includes(r.code) ? r.code : 'X'}">${esc(r.code)}</span>　由空間名稱自動判定`
+    : '—';
+  renderDataCard(r);
+  renderChecks();
+  renderList();
+  draw();
+}
+
+/** 「自動去抓這個區域的相關資料」：從數量明細找出對應列 */
+function matchSource(r) {
+  if (!state.source.length || !clean(r.room) || !r.code) return null;
+  return state.source.filter((row) => row.room === r.room && spaceCode(row.space) === r.code);
+}
+
+function renderDataCard(r) {
+  const box = document.getElementById('pData');
+  if (!r) { box.innerHTML = ''; return; }
+  if (!state.source.length) {
+    box.innerHTML = '<div class="data"><span class="k">相關資料</span>尚未匯入數量明細，匯入後這裡會自動列出這個區域的樓層、面積與材料。</div>';
+    return;
+  }
+  const rows = matchSource(r);
+  if (!clean(r.room) || !clean(r.label)) {
+    box.innerHTML = '<div class="data warn"><span class="k">相關資料</span>請先填房號與空間。</div>';
+    return;
+  }
+  if (!rows.length) {
+    box.innerHTML = `<div class="data bad"><b>⚠ 數量明細裡找不到 ${esc(r.room)} 的「${esc(r.label)}」</b><br>
+      房號或空間名稱可能打錯，或這個空間本來就不在明細內。</div>`;
+    return;
+  }
+  const floors = [...new Set(rows.map((x) => x.floor))].sort((a, b) => Number(a) - Number(b));
+  const positions = [...new Set(rows.map((x) => x.position).filter(Boolean))];
+  const areas = rows.map((x) => x.area).filter((a) => a > 0);
+  const areaText = areas.length
+    ? (Math.min(...areas) === Math.max(...areas)
+      ? `${Math.min(...areas)} ㎡`
+      : `${Math.min(...areas)} – ${Math.max(...areas)} ㎡`)
+    : '—';
+  box.innerHTML = `<div class="data ok">
+    <b>✓ 對應到 ${rows.length} 筆數量明細</b><br>
+    <span class="k">涵蓋樓層</span>${floors.join('、')}F<br>
+    <span class="k">單層面積</span>${esc(areaText)}<br>
+    <span class="k">施作位置</span>${positions.length ? esc(positions.join('、')) : '—'}
+  </div>`;
+}
+
+function refreshSidePanel() {
+  const r = selected();
+  document.getElementById('delBtn').disabled = !r;
+  document.getElementById('sideTitle').textContent = r
+    ? `${r.room || '未命名'}${r.label ? '　' + r.label : ''}`
+    : '尚未選取區域';
+  document.getElementById('pRoom').value = r?.room || '';
+  document.getElementById('pLabel').value = r?.label || '';
+  document.getElementById('pCode').innerHTML = r?.code
+    ? `<span class="chip ${['I','B','K','Y'].includes(r.code) ? r.code : 'X'}">${esc(r.code)}</span>　由空間名稱自動判定`
+    : '—';
+  renderDataCard(r);
+}
+
+function renderList() {
+  const query = clean(document.getElementById('listSearch').value).toLowerCase();
+  const root = document.getElementById('list');
+  const rows = state.regions.filter((r) => !query
+    || `${r.room} ${r.label} ${r.code}`.toLowerCase().includes(query));
+  if (!rows.length) {
+    root.innerHTML = '<div class="empty">沒有符合的區域</div>';
+    return;
+  }
+  root.innerHTML = rows.map((r) => {
+    const named = clean(r.room) && clean(r.label);
+    const rowsFound = named ? matchSource(r) : null;
+    const mark = !named ? '<span class="badmark" title="未命名">●</span>'
+      : (rowsFound && !rowsFound.length ? '<span class="warnmark" title="數量明細找不到對應">▲</span>' : '');
+    return `<div class="item ${r.id === state.selectedId ? 'on' : ''}" onclick="selectRegion('${esc(r.id)}')">
+      <i style="background:${regionColor(r)}"></i>
+      <div class="n"><b>${esc(r.room || '未命名')}</b><small>${esc(r.label || '尚未設定空間')}　${r.shape === 'poly' ? '多邊形' : '矩形'}</small></div>
+      ${mark}
+    </div>`;
+  }).join('');
+}
+
+function renderChecks() {
+  const root = document.getElementById('checks');
+  const total = state.regions.length;
+  const named = state.regions.filter((r) => clean(r.room) && clean(r.label));
+  const unnamed = total - named.length;
+
+  // 重複的房號＋空間
+  const seen = new Map();
+  named.forEach((r) => {
+    const key = `${r.room}|${r.code}`;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  });
+  const duplicated = [...seen.values()].filter((n) => n > 1).length;
+
+  const lines = [
+    `<div class="check-row ${total ? 'ok' : 'warn'}"><span>區域總數</span><b>${total}</b></div>`,
+    `<div class="check-row ${unnamed ? 'bad' : 'ok'} click" onclick="jumpTo('unnamed')"><span>未命名</span><b>${unnamed}</b></div>`,
+    `<div class="check-row ${duplicated ? 'warn' : 'ok'}"><span>房號＋空間重複</span><b>${duplicated}</b></div>`,
+  ];
+
+  if (state.source.length) {
+    const noMatch = named.filter((r) => !matchSource(r).length).length;
+    // 明細裡有、但還沒框選的空間
+    const covered = new Set(named.map((r) => `${r.room}|${r.code}`));
+    const needed = new Set(state.source.map((row) => `${row.room}|${spaceCode(row.space)}`));
+    const missing = [...needed].filter((key) => !covered.has(key));
+    lines.push(
+      `<div class="check-row ${noMatch ? 'warn' : 'ok'} click" onclick="jumpTo('nomatch')"><span>明細查無對應</span><b>${noMatch}</b></div>`,
+      `<div class="check-row ${missing.length ? 'warn' : 'ok'}"><span>明細有、尚未框選</span><b>${missing.length}</b></div>`,
+    );
+    if (missing.length) {
+      lines.push(`<div class="empty" style="text-align:left;padding:6px 2px">尚未框選：${
+        missing.slice(0, 24).map((k) => esc(k.replace('|', ' '))).join('、')
+      }${missing.length > 24 ? ` …共 ${missing.length} 項` : ''}</div>`);
+    }
+  } else {
+    lines.push('<div class="empty" style="padding:8px 2px">匯入數量明細後，這裡會多出「明細查無對應」與「明細有、尚未框選」兩項檢核。</div>');
+  }
+  root.innerHTML = lines.join('');
+}
+
+function jumpTo(kind) {
+  const target = state.regions.find((r) => (kind === 'unnamed'
+    ? !clean(r.room) || !clean(r.label)
+    : clean(r.room) && clean(r.label) && state.source.length && !matchSource(r).length));
+  if (!target) return toast('沒有這一類的區域');
+  selectRegion(target.id);
+  const box = rectOf(target);
+  const stage = document.getElementById('stage');
+  const [cx, cy] = toScreen(box.x + box.w / 2, box.y + box.h / 2);
+  state.view.panX += stage.clientWidth / 2 - cx;
+  state.view.panY += stage.clientHeight / 2 - cy;
+  draw();
+}
+
+function refreshDatalists() {
+  const rooms = [...new Set([...SEED.map((s) => s.room), ...state.source.map((r) => r.room)])].sort();
+  const labels = [...new Set([...SEED.map((s) => s.label), ...state.source.map((r) => r.space)])].filter(Boolean).sort();
+  document.getElementById('roomList').innerHTML = rooms.map((v) => `<option value="${esc(v)}">`).join('');
+  document.getElementById('labelList').innerHTML = labels.map((v) => `<option value="${esc(v)}">`).join('');
+}
+
+function refresh() {
+  refreshSidePanel();
+  refreshDatalists();
+  renderChecks();
+  renderList();
+  draw();
+}
+
+/* ---------------- 啟動 ---------------- */
+
+resizeCanvas();
+refresh();
+setMode('select');
+</script>
+</body>
+</html>
