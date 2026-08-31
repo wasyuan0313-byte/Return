@@ -754,7 +754,7 @@ function calculate() {
   }
   root.innerHTML = items.map((item) => `
     <div class="material-line">
-      <div><div class="mat-name">${esc(item.name)}</div><div class="mat-meta">${esc(item.category)}｜Excel ${esc([...new Set(item.sourceRows)].join('、'))}</div></div>
+      <div><div class="mat-name">${esc(item.name)}</div><div class="mat-meta">${esc(item.category)}</div></div>
       <div class="mat-input"><input type="number" min="0" step="0.1" placeholder="0" value="${esc(draftMaterials[item.key] ?? '')}" oninput="updateMaterial(decodeURIComponent('${encodeURIComponent(item.key)}'),this.value)"><span>${esc(item.unit)}</span></div>
     </div>`).join('');
 }
