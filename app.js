@@ -516,7 +516,7 @@ function planImageFallback(image) {
   if (image.dataset.retried) return planImageFailed();
   image.dataset.retried = '1';
   assetPrefix = '';
-  image.src = 'floor-plan-04.png?v=20260819-3';
+  image.src = 'floor-plan-04.png?v=20260831-1';
 }
 
 /**
