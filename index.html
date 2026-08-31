@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>東仁安居｜工務施工回報與管理系統</title>
-<script src="assets/xlsx.full.min.js"></script>
+<script src="assets/xlsx.full.min.js" onerror="var s=document.createElement('script');s.src='xlsx.full.min.js';document.head.appendChild(s)"></script>
 <style>
 :root{--navy:#101c31;--navy2:#192a45;--blue:#2f69e8;--blue2:#1e55c8;--ink:#1c2940;--muted:#718096;--line:#d8e0eb;--bg:#f3f6fa;--white:#fff;--green:#098667;--red:#cf4d55;--pink:#f1a7c2;--pink-bg:#fff8fb;--shadow:0 10px 30px #17233c14}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
@@ -20,20 +20,131 @@
 .modal{position:fixed;inset:0;background:#081322c7;z-index:100;display:grid;place-items:center;padding:20px}.modal-box{width:min(470px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#fff;border-radius:15px;padding:25px;box-shadow:0 22px 70px #0005}.modal-box.wide{width:min(680px,100%)}.modal-box h2{margin:0 0 7px}.modal-box>p{color:var(--muted);font-size:12px;line-height:1.6}.modal-box input[type=text]{width:100%;border:1px solid var(--line);border-radius:9px;padding:12px;margin:9px 0}.login-code{display:grid;grid-template-columns:auto 1fr;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:12px 0}.login-code span{align-self:stretch;display:flex;align-items:center;background:#edf2f8;padding:0 14px;font-family:Consolas,monospace;font-weight:900;color:#506079}.modal-box .login-code input{border:0;border-radius:0;margin:0;font-family:Consolas,monospace;font-size:20px;font-weight:900;letter-spacing:.22em;text-align:center}.modal-box .login-code input:focus{outline:2px solid var(--blue);outline-offset:-2px}.modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px}.confirm-grid{display:grid;grid-template-columns:120px 1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:14px}.confirm-grid dt,.confirm-grid dd{margin:0;padding:10px;border-bottom:1px solid var(--line);font-size:12px}.confirm-grid dt{background:#f3f6fa;font-weight:900}.confirm-grid dd{background:#fff}.confirm-grid dt:last-of-type,.confirm-grid dd:last-of-type{border-bottom:0}.toast{position:fixed;right:24px;bottom:24px;background:#143326;color:#fff;border-radius:10px;padding:12px 16px;z-index:150;box-shadow:0 8px 24px #0003}.toast.error{background:#7b2430}
 @media(max-width:1100px){.main-grid{grid-template-columns:1fr}.side-card{min-height:auto}.selection{max-height:350px}.consumption-grid{grid-template-columns:1fr}.worker-card,.material-card{min-height:auto}.permission-form{grid-template-columns:1fr 1fr}.permission-row{grid-template-columns:70px minmax(120px,1fr) 180px 140px}.permission-actions{grid-column:2/-1}}
 @media(max-width:720px){.top{padding:11px 13px;flex-wrap:wrap}.brand h1{font-size:16px}.brand p{display:none}.account{margin-left:auto;padding:7px 9px;max-width:43vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mode-switch{width:100%}.mode-btn{flex:1;padding:9px}.wrap{padding:12px}.panel-head,.front-body{padding:16px}.panel-head p,.status{display:none}.setup-grid{grid-template-columns:1fr}.plan-toolbar{align-items:flex-start}.plan-toolbar-meta{align-items:flex-end;flex-direction:column;gap:3px}.plan-viewport{height:62vh;min-height:360px}.plan-stage{width:1800px;min-width:1800px;flex-basis:1800px}.submit-row{display:block}.submit-row .btn{width:100%;margin-top:10px}.backend-layout{grid-template-columns:1fr}.back-nav{border-radius:15px 15px 0 0;display:flex;overflow:auto;gap:5px;padding:10px}.back-nav h3{display:none}.back-tab{white-space:nowrap;width:auto;margin:0}.source-stats{grid-template-columns:1fr}.permission-form,.permission-row{grid-template-columns:1fr}.permission-actions{grid-column:1}.confirm-grid{grid-template-columns:95px 1fr}}
+.modal-box input[type=password]{width:100%;border:1px solid var(--line);border-radius:9px;padding:12px;margin:9px 0}
+.login-label{display:block;font-size:12px;font-weight:800;margin-top:10px}
+.login-hint{border:1px solid #f1afb5;background:#fff1f2;color:#a62f3a;border-radius:9px;padding:10px;font-size:12px;margin:10px 0}
+.account-form{display:grid;grid-template-columns:1fr 1fr 1fr 150px auto;gap:10px;align-items:end;border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:13px}
+.account-form .field input,.account-form .field select{width:100%}
+.account-actions{display:flex;gap:8px;margin-left:auto}
+@media(max-width:1100px){.account-form{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){.account-form{grid-template-columns:1fr}}
+
+/* ============ 平面圖縮放 ============ */
+.plan-zoom{display:inline-flex;align-items:center;gap:2px;border:1px solid #3d5273;background:#1b2a44;border-radius:8px;overflow:hidden}
+.plan-zoom button{border:0;background:transparent;color:#dbe8ff;font-size:16px;font-weight:900;line-height:1;padding:7px 11px;min-width:36px;min-height:36px}
+.plan-zoom button:active{background:#2c4066}
+.plan-zoom span{font-family:Consolas,monospace;font-size:11px;color:#9fb0c8;min-width:42px;text-align:center;font-variant-numeric:tabular-nums}
+.plan-stage.zoom-out .space-hotspot{min-width:0;min-height:0;border-width:1px}
+.plan-help.plan-error{border:1px solid #f1afb5;background:#3a1c22;color:#ffc9ce;border-radius:9px;padding:11px;text-align:left;line-height:1.7}
+.plan-help.plan-error code{background:#00000045;border-radius:4px;padding:1px 5px;font-family:Consolas,monospace}
+
+/* ============ 手機版適配 ============ */
+@media(max-width:720px){
+  /* 頁首壓縮成兩列，帳號與登出並排 */
+  .top{min-height:0;padding:9px 12px;gap:9px;row-gap:8px}
+  .logo{width:36px;height:36px;font-size:18px;border-radius:9px}
+  .brand h1{font-size:15px;letter-spacing:0}
+  .account{margin-left:0;padding:7px 10px;font-size:11px;min-height:34px;max-width:none;flex:1}
+  .top .account:first-of-type{margin-left:auto;flex:2;text-align:left}
+  .top .account:last-of-type{flex:0 0 auto}
+  .mode-switch{width:100%;gap:6px}
+  .mode-btn{flex:1;padding:11px 8px;font-size:13px;min-height:44px}
+
+  /* 前台 */
+  .wrap{padding:10px}
+  .panel{border-radius:13px}
+  .panel-head{padding:14px;gap:9px}
+  .panel-head h2{font-size:18px}
+  .front-body{padding:14px}
+  .identity-strip{flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px}
+  .identity-strip span{font-size:11px;line-height:1.5}
+  .section-label{font-size:14px}
+
+  /* 平面圖：預設縮到看得見全貌，靠縮放鈕操作 */
+  .plan-card{padding:10px;border-radius:12px}
+  .plan-toolbar{flex-direction:column;align-items:stretch;gap:8px;margin-bottom:9px}
+  .plan-toolbar-meta{flex-direction:row;align-items:center;justify-content:space-between;gap:8px;width:100%}
+  .plan-toolbar-meta>span{font-size:11px}
+  .plan-viewport{height:54vh;min-height:300px}
+  .plan-help{font-size:11px;line-height:1.6;margin:9px 2px}
+  .plan-selection-strip{padding:9px 10px}
+
+  /* 出工人數與材料 */
+  .worker-card,.material-card{padding:14px}
+  .counter button{width:52px;height:52px}
+  .counter input{height:52px;width:84px;font-size:19px}
+  .material-line{grid-template-columns:1fr;gap:7px;padding:11px 2px}
+  .material-scroll{max-height:none}
+
+  /* 後台 */
+  .back-nav{padding:8px;gap:6px;-webkit-overflow-scrolling:touch}
+  .back-tab{padding:10px 13px;font-size:13px;min-height:42px;display:flex;align-items:center;border-radius:8px}
+  .back-main{padding:14px}
+  .back-head{flex-direction:column;align-items:stretch;gap:10px}
+  .back-head h2{font-size:18px}
+  .toolbar{flex-direction:column;gap:8px}
+  .toolbar .btn,.toolbar .search{width:100%;max-width:none;min-height:44px}
+  .template-note{font-size:11px;line-height:1.65;padding:10px}
+  .table{font-size:11px}
+  .table th,.table td{padding:8px}
+  .stat{padding:10px}
+
+  /* 帳號管理 */
+  .account-form{padding:12px;gap:9px}
+  .permission-row{gap:9px;padding:12px}
+  .permission-actions{display:flex;gap:8px}
+  .permission-actions .btn{flex:1;min-height:42px}
+
+  /* 視窗 */
+  .modal{padding:12px;align-items:start}
+  .modal-box{padding:18px;border-radius:13px;margin-top:6vh}
+  .modal-box h2{font-size:19px}
+  .modal-actions{gap:8px}
+  .modal-actions .btn{flex:1;min-height:46px}
+  .confirm-grid{grid-template-columns:88px 1fr}
+  .confirm-grid dt,.confirm-grid dd{font-size:11px;padding:8px}
+
+  /* iOS 聚焦時不要自動放大整頁：輸入框字級一律 16px 起跳 */
+  .field input,.field select,.field textarea,.search,
+  .modal-box input[type=text],.modal-box input[type=password],
+  .counter input,.mat-input input{font-size:16px}
+
+  /* 送出按鈕固定好按 */
+  .submit-row .btn{min-height:50px;font-size:15px}
+}
+
+@media(max-width:400px){
+  .brand h1{font-size:14px}
+  .mode-btn{font-size:12px;padding:10px 5px}
+  .account{font-size:10px}
+}
+
+/* ============ 平面圖可點區域（floor-plan-regions.json） ============ */
+.plan-svg{position:absolute;inset:0;width:100%;height:100%;z-index:2;overflow:visible}
+.plan-region{fill:#ffffff00;stroke:#ffffff00;stroke-width:2;cursor:pointer;transition:fill .12s,stroke .12s}
+.plan-region:hover{fill:#ffffff3b;stroke:#fff}
+.plan-region.selected{fill:#246bff4d;stroke:#246bff;stroke-width:2.5}
+.plan-region:focus-visible{outline:none;stroke:#fff;stroke-width:3.5}
+.plan-tag{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;
+  background:#246bff;color:#fff;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:900;
+  white-space:nowrap;box-shadow:0 1px 4px #0b152488;line-height:1.4}
+@media(max-width:720px){.plan-tag{font-size:9px;padding:1px 4px}}
 </style>
 </head>
 <body>
+<div id="appShell" class="hidden">
 <header class="top">
   <div class="logo">⛑</div>
   <div class="brand"><h1>工務施工回報與管理系統</h1><p>東仁安居｜施工進度與材料用量回報平台</p></div>
-  <button id="accountBtn" class="account" type="button">免登入模式</button>
-  <div class="mode-switch"><button id="frontBtn" class="mode-btn active" onclick="setMode('front')">⛑ 前端施工填報</button><button id="backBtn" class="mode-btn" onclick="setMode('back')">⚙ 後台管理中心</button></div>
+  <button id="accountBtn" class="account" type="button" onclick="openChangePassword()" title="點我修改密碼">未登入</button>
+  <button class="account" type="button" onclick="doLogout()">登出</button>
+  <div class="mode-switch hidden"><button id="frontBtn" class="mode-btn active" onclick="setMode('front')">⛑ 前端施工填報</button><button id="backBtn" class="mode-btn hidden" onclick="setMode('back')">⚙ 後台管理中心</button></div>
 </header>
 <main class="wrap">
 <section id="front" class="panel">
   <div class="panel-head"><div style="font-size:25px;color:var(--blue)">▣</div><div><h2>實際施作情形填報</h2><p>依序選擇日期、樓層與工項，再從平面圖點選房號及施作空間。</p></div><div id="connectionStatus" class="status">連線確認中</div></div>
   <div class="front-body">
-    <div class="identity-strip"><strong id="reporterIdentity">免登入填報</strong><span>不需要權限碼；請於下方填寫本次填表人姓名。</span></div>
+    <div class="identity-strip"><strong id="reporterIdentity">未登入</strong><span>填表人以登入帳號為準，系統會記錄每筆回報由誰填寫。</span></div>
     <div class="section-label">1. 選擇施作基本資料</div>
     <div class="setup-grid">
       <div class="field"><label>施工日期 *</label><input id="date" type="date"></div>
@@ -44,9 +155,9 @@
     <div class="section-label">2. 從平面圖選取房號與施作空間</div>
     <div class="main-grid">
       <div class="plan-card">
-        <div class="plan-toolbar"><span>🗺 <b>直接點選施作空間</b></span><div class="plan-toolbar-meta"><span>藍色區塊為已選空間</span><button class="link" type="button" onclick="clearSelection()">清除全部</button></div></div>
-        <div class="plan-viewport"><div class="plan-stage"><img src="assets/floor-plan-04.png?v=20260817-1" alt="東仁安居各戶空間與房號平面圖"><div id="hotspots"></div></div></div>
-        <div class="plan-help">請直接點選圖中的完整空間標號，例如「A02 廁所」；可水平及垂直捲動查看全部標號。</div>
+        <div class="plan-toolbar"><span>🗺 <b>直接點選施作空間</b></span><div class="plan-toolbar-meta"><div class="plan-zoom"><button type="button" onclick="zoomPlan(-1)" aria-label="縮小平面圖">−</button><span id="planZoomLabel">100%</span><button type="button" onclick="zoomPlan(1)" aria-label="放大平面圖">＋</button></div><button class="link" type="button" onclick="clearSelection()">清除全部</button></div></div>
+        <div class="plan-viewport" id="planViewport"><div class="plan-stage" id="planStage"><img id="planImage" src="assets/floor-plan-04.png?v=20260819-3" alt="東仁安居各戶空間與房號平面圖" onerror="planImageFallback(this)"><div id="hotspots"></div></div></div>
+        <div class="plan-help" id="planHelp">先用 <b>−</b> 縮小找到位置，再用 <b>＋</b> 放大點選空間標號，例如「A02 廁所」。</div>
         <div class="plan-selection-strip"><div class="plan-selection-head"><b>已選施作區域</b><strong id="selectedCount">0 戶／0 區</strong></div><div id="selection" class="selection-chips"></div></div>
       </div>
     </div>
@@ -59,17 +170,54 @@
 </section>
 
 <section id="back" class="backend panel"><div class="backend-layout">
-  <nav class="back-nav"><h3>後台管理</h3><button class="back-tab active" data-tab="reports" onclick="backTab('reports')">施工回報紀錄</button><button class="back-tab" data-tab="source" onclick="backTab('source')">Excel 數量資料</button><button id="permissionTabBtn" class="back-tab hidden" data-tab="permissions">權限碼管理</button></nav>
+  <nav class="back-nav"><h3>後台管理</h3><button class="back-tab active" data-tab="reports" onclick="backTab('reports')">施工回報紀錄</button><button class="back-tab" data-tab="source" onclick="backTab('source')">Excel 數量資料</button><button id="accountTabBtn" class="back-tab hidden" data-tab="accounts" onclick="backTab('accounts')">帳號管理</button></nav>
   <div class="back-main">
     <div id="reports" class="back-view active"><div class="back-head"><h2>施工回報紀錄</h2><div class="toolbar"><input id="reportSearch" class="search" placeholder="搜尋日期、填表人、房號…" oninput="renderReports()"><button class="btn dark" onclick="exportReports()">匯出 Excel</button></div></div><div class="template-note">匯出會保留新版「回報檔案格式.xlsx」的 A:X 欄位，另附施工統計頁保存日期、施作面積與總出工人數。</div><div class="table-wrap"><table class="table"><thead><tr><th>日期</th><th>填表人</th><th>樓層</th><th>房號／空間</th><th>工項</th><th>人數</th><th>材料</th><th>備註</th><th></th></tr></thead><tbody id="reportBody"></tbody></table></div></div>
     <div id="source" class="back-view"><div class="back-head"><h2>Excel 數量資料</h2><label class="btn primary file">匯入數量明細 Excel<input id="excel" type="file" accept=".xlsx,.xls" onchange="importExcel(event)"></label></div><div class="template-note">回報匯出範本已隨系統內建；此處只需匯入含有「數量明細表」的材料數量檔，供前端帶入正確材料品項。</div><div class="source-stats"><div class="stat"><span>來源檔案</span><b id="sourceName">尚未匯入</b></div><div class="stat"><span>有效資料</span><b id="sourceRows">0 筆</b></div><div class="stat"><span>涵蓋樓層</span><b id="sourceFloors">—</b></div></div><input id="sourceSearch" class="search" style="margin-bottom:10px" placeholder="搜尋房號、空間或材料…" oninput="renderSource()"><div class="table-wrap"><table class="table"><thead><tr><th>樓層</th><th>房號</th><th>空間</th><th>位置</th><th>地磚材料</th><th>壁磚材料</th><th>隔音材料</th></tr></thead><tbody id="sourceBody"></tbody></table></div></div>
+    <div id="accounts" class="back-view"><div class="back-head"><h2>帳號管理</h2></div>
+      <div class="template-note">後端只保存密碼的雜湊值，無法反查原始密碼。同事忘記密碼時，用「重設密碼」給一組新的。停用帳號會立刻讓對方登出。</div>
+      <div class="account-form">
+        <div class="field"><label>姓名 *</label><input id="accountName" type="text" placeholder="例：王小明"></div>
+        <div class="field"><label>登入帳號 *</label><input id="accountId" type="text" placeholder="3–20 碼英數字"></div>
+        <div class="field"><label>初始密碼 *</label><input id="accountPassword" type="text" placeholder="至少 6 碼"></div>
+        <div class="field"><label>權限</label><select id="accountRole"><option value="front">僅前端填報</option><option value="admin">後台管理＋填報</option></select></div>
+        <button class="btn primary" onclick="addAccount()">建立帳號</button>
+      </div>
+      <div id="issuedAccount" class="issued hidden"></div>
+      <div id="accountList" class="permission-list"></div>
+    </div>
   </div>
 </div></section>
 </main>
+</div>
 
 <div id="toast" class="toast hidden"></div>
 <div id="confirmModal" class="modal hidden"><div class="modal-box wide"><h2>確認施工回報內容</h2><p>請確認以下填列結果。按下「確實送出」後才會正式儲存。</p><dl id="confirmSummary" class="confirm-grid"></dl><div class="modal-actions"><button class="btn ghost" onclick="cancelSubmit()">返回修改</button><button id="confirmSubmitBtn" class="btn primary" onclick="commitReport()">確實送出</button></div></div></div>
 
-<script src="app.js?v=20260819-1"></script>
+<div id="loginModal" class="modal hidden"><div class="modal-box">
+  <h2>工務回報系統登入</h2>
+  <p>請輸入管理員配發的帳號與密碼。系統會記錄每筆回報由哪個帳號送出。</p>
+  <div id="loginHint" class="login-hint hidden"></div>
+  <label class="login-label" for="loginAccount">帳號</label>
+  <input id="loginAccount" type="text" autocomplete="username" placeholder="例：wang">
+  <label class="login-label" for="loginPassword">密碼</label>
+  <input id="loginPassword" type="password" autocomplete="current-password" placeholder="請輸入密碼">
+  <div class="modal-actions"><button id="loginBtn" class="btn primary" onclick="doLogin()">登入</button></div>
+</div></div>
+
+<div id="passwordModal" class="modal hidden"><div class="modal-box">
+  <h2>修改密碼</h2>
+  <p>修改後其他裝置的登入狀態仍然有效，如需全部登出請洽管理員重設密碼。</p>
+  <label class="login-label" for="oldPassword">目前密碼</label>
+  <input id="oldPassword" type="password" autocomplete="current-password">
+  <label class="login-label" for="newPassword">新密碼（至少 6 碼）</label>
+  <input id="newPassword" type="password" autocomplete="new-password">
+  <label class="login-label" for="newPassword2">再輸入一次新密碼</label>
+  <input id="newPassword2" type="password" autocomplete="new-password">
+  <div class="modal-actions"><button class="btn ghost" onclick="closeChangePassword()">取消</button><button class="btn primary" onclick="submitChangePassword()">確定修改</button></div>
+</div></div>
+
+<script src="config.js?v=20260819-2"></script>
+<script src="app.js?v=20260819-2"></script>
 </body>
 </html>
