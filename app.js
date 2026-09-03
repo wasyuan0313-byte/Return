@@ -7,10 +7,18 @@ let db = {
   reports: [],
   source: [],
   sourceName: '',
+  works: [],
   users: [],
 };
+const DEFAULT_WORKS = [
+  { key: '磁磚-地磚', name: '地磚', active: true, sortOrder: 1, builtIn: true, manualMaterials: [], excelMaterials: [], materials: [] },
+  { key: '磁磚-壁磚', name: '壁磚', active: true, sortOrder: 2, builtIn: true, manualMaterials: [], excelMaterials: [], materials: [] },
+  { key: '防水工程', name: '防水', active: true, sortOrder: 3, builtIn: true, manualMaterials: [], excelMaterials: [], materials: [] },
+  { key: '隔音地板', name: '隔音地墊', active: true, sortOrder: 4, builtIn: true, manualMaterials: [], excelMaterials: [], materials: [] },
+];
 let authUser = null;
 let sessionToken = localStorage.getItem(TOKEN_KEY) || '';
+let backendCapabilities = {};
 let pickedSpotIds = new Set();
 let draftMaterials = {};
 let pendingReport = null;
@@ -85,6 +93,8 @@ function toast(message, error = false) {
 }
 
 function workLabel(work) {
+  const configured = db.works.find((item) => item.key === work);
+  if (configured) return configured.name;
   return ({
     '磁磚-地磚': '地磚',
     '磁磚-壁磚': '壁磚',
@@ -102,12 +112,81 @@ function exportWorkLabel(work) {
   })[work] || work;
 }
 
+function normalizeMaterial(item) {
+  const name = clean(item?.name);
+  if (!name) return null;
+  return {
+    name,
+    category: clean(item.category) || '一般材料',
+    unit: clean(item.unit),
+  };
+}
+
+function materialIdentity(item) {
+  const material = normalizeMaterial(item);
+  return material ? `${material.category}|${material.name}|${material.unit}` : '';
+}
+
+function uniqueMaterials(materials) {
+  const found = new Map();
+  (materials || []).forEach((item) => {
+    const material = normalizeMaterial(item);
+    if (!material) return;
+    const key = materialIdentity(material).toLowerCase();
+    if (!found.has(key)) found.set(key, material);
+  });
+  return [...found.values()];
+}
+
+function normalizeWorkItem(work) {
+  const manualMaterials = uniqueMaterials(work?.manualMaterials || []);
+  const excelMaterials = uniqueMaterials(work?.excelMaterials || []);
+  return {
+    ...work,
+    manualMaterials,
+    excelMaterials,
+    materials: uniqueMaterials(work?.materials?.length ? work.materials : [...manualMaterials, ...excelMaterials]),
+  };
+}
+
+function workIdentity(value) {
+  return normalizeExcelWork(clean(value))
+    .replace(/[‐‑‒–—－_]/g, '-')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function workAliases(workOrKey) {
+  const supplied = typeof workOrKey === 'object' ? workOrKey : null;
+  const text = supplied ? clean(supplied.key || supplied.name) : clean(workOrKey);
+  const work = supplied || db.works.find((item) => item.key === text || item.name === text)
+    || { key: text, name: text };
+  return new Set([workIdentity(work.key), workIdentity(work.name)].filter(Boolean));
+}
+
+function sourceWorkMaterials(workOrKey, rows = db.source) {
+  const aliases = workAliases(workOrKey);
+  const materials = [];
+  (rows || []).forEach((row) => Object.entries(row.materials || {}).forEach(([sourceWork, list]) => {
+    if (aliases.has(workIdentity(sourceWork)) && Array.isArray(list)) materials.push(...list);
+  }));
+  return uniqueMaterials(materials);
+}
+
+function effectiveExcelMaterials(work) {
+  return uniqueMaterials([...(work?.excelMaterials || []), ...sourceWorkMaterials(work)]);
+}
+
+function effectiveWorkMaterials(work) {
+  return uniqueMaterials([...(work?.materials || []), ...(work?.manualMaterials || []), ...effectiveExcelMaterials(work)]);
+}
+
 function spaceCode(value) {
   const text = clean(typeof value === 'object' ? value.code || value.label : value);
   if (['B', 'K', 'I', 'Y', '廊', '廳'].includes(text)) return text;
   if (/廁所/.test(text)) return 'B';
   if (/廚房/.test(text)) return 'K';
-  if (/陽台/.test(text)) return 'Y';
+  if (/陽台|陽臺/.test(text)) return 'Y';
   if (/室內|臥室|主臥|客廳/.test(text)) return 'I';
   if (/走廊/.test(text)) return '廊';
   return text;
@@ -161,9 +240,9 @@ async function api(action, payload = {}) {
 function setConnection(ok, text) {
   const element = document.getElementById('connectionStatus');
   element.textContent = text || (ok ? '集中資料庫連線正常' : '伺服器未連線');
-  element.style.borderColor = ok ? '#9be1c9' : '#f1afb5';
-  element.style.background = ok ? '#effdf7' : '#fff1f2';
-  element.style.color = ok ? '#087256' : '#a62f3a';
+  element.style.borderColor = ok ? '#2d8063' : '#7b3038';
+  element.style.background = ok ? '#0d291f' : '#2b1115';
+  element.style.color = ok ? '#82dfbd' : '#ff9ca4';
 }
 
 async function syncState() {
@@ -173,8 +252,12 @@ async function syncState() {
     reports: Array.isArray(state.reports) ? state.reports : [],
     source: Array.isArray(state.source) ? state.source : [],
     sourceName: state.sourceName || '',
+    works: (Array.isArray(state.works) && state.works.length
+      ? state.works
+      : DEFAULT_WORKS).map(normalizeWorkItem),
     users: Array.isArray(state.users) ? state.users : [],
   };
+  backendCapabilities = state.capabilities || {};
   setConnection(true, authUser ? `已連線｜${authUser.name}` : '已連線');
 }
 
@@ -195,7 +278,9 @@ function clearSession() {
   authUser = null;
   localStorage.removeItem(TOKEN_KEY);
   db.reports = [];
+  db.works = DEFAULT_WORKS.map(normalizeWorkItem);
   db.users = [];
+  backendCapabilities = {};
 }
 
 function showLogin(message) {
@@ -219,10 +304,12 @@ async function enterApp() {
   applyAccess();
   setMode('front');
   initFloor();
+  initWorkOptions();
   renderSelection();
   calculate();
   renderReports();
   renderSource();
+  renderWorkItems();
   renderAccounts();
   await loadPlanRegions();
   renderHotspots();
@@ -309,6 +396,8 @@ function applyAccess() {
   document.querySelector('.mode-switch').classList.toggle('hidden', !admin);
   const accountTab = document.getElementById('accountTabBtn');
   if (accountTab) accountTab.classList.toggle('hidden', !admin);
+  const workTab = document.getElementById('workTabBtn');
+  if (workTab) workTab.classList.toggle('hidden', !admin);
   const reporter = document.getElementById('reporterName');
   if (reporter && authUser) {
     // 填表人一律等於登入帳號，避免冒名填報
@@ -332,6 +421,7 @@ function setMode(mode) {
   if (mode === 'back') {
     renderReports();
     renderSource();
+    renderWorkItems();
     renderAccounts();
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -469,6 +559,201 @@ function renderAccounts() {
   }).join('') || '<div class="empty">尚未建立任何帳號</div>';
 }
 
+function activeWorks() {
+  return db.works.filter((work) => work.active).sort((a, b) => n(a.sortOrder) - n(b.sortOrder)
+    || workLabel(a.key).localeCompare(workLabel(b.key), 'zh-TW'));
+}
+
+function initWorkOptions() {
+  const element = document.getElementById('work');
+  if (!element) return;
+  const old = element.value;
+  const works = activeWorks();
+  element.innerHTML = works.length
+    ? works.map((work) => `<option value="${esc(work.key)}">${esc(work.name)}</option>`).join('')
+    : '<option value="">目前沒有可填報的工項</option>';
+  element.disabled = !works.length;
+  if (works.some((work) => work.key === old)) element.value = old;
+  if (element.value !== old) draftMaterials = {};
+}
+
+function materialCatalog() {
+  const materials = [];
+  db.source.forEach((row) => Object.values(row.materials || {}).forEach((list) => {
+    if (Array.isArray(list)) materials.push(...list);
+  }));
+  db.works.forEach((work) => materials.push(...(work.materials || [])));
+  return uniqueMaterials(materials).sort((a, b) => a.category.localeCompare(b.category, 'zh-TW')
+    || a.name.localeCompare(b.name, 'zh-TW'));
+}
+
+function renderMaterialChoices(rootId, selectedMaterials = []) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  const selected = new Set(selectedMaterials.map((item) => materialIdentity(item).toLowerCase()));
+  const catalog = materialCatalog();
+  root.innerHTML = catalog.length ? catalog.map((material) => {
+    const key = materialIdentity(material);
+    return `<label class="material-choice">
+      <input type="checkbox" data-material-key="${encodeURIComponent(key)}" ${selected.has(key.toLowerCase()) ? 'checked' : ''}>
+      <span><b>${esc(material.name)}</b><small>${esc(material.category)}${material.unit ? `｜${esc(material.unit)}` : ''}</small></span>
+    </label>`;
+  }).join('') : '<span class="choice-empty">尚無材料清單；可在下方手動輸入，或先匯入數量明細 Excel。</span>';
+}
+
+function chosenMaterials(rootId) {
+  const catalog = new Map(materialCatalog().map((item) => [materialIdentity(item).toLowerCase(), item]));
+  return [...document.querySelectorAll(`#${rootId} input[data-material-key]:checked`)]
+    .map((input) => catalog.get(decodeURIComponent(input.dataset.materialKey).toLowerCase()))
+    .filter(Boolean);
+}
+
+function parseManualMaterials(text) {
+  return uniqueMaterials(String(text || '').split(/\r?\n|[,，、]+/).map((line) => {
+    const parts = line.split(/[|｜]/).map(clean);
+    return { name: parts[0], unit: parts[1] || '', category: '後台設定' };
+  }));
+}
+
+function materialBadges(materials) {
+  return materials.length
+    ? materials.map((material) => `<span class="material-chip">${esc(material.name)}${material.unit ? `／${esc(material.unit)}` : ''}</span>`).join('')
+    : '<span class="work-storage">尚未連動材料</span>';
+}
+
+async function addWorkItem() {
+  if (!isAdmin()) return toast('只有後台管理帳號可以新增工項', true);
+  const input = document.getElementById('workName');
+  const name = clean(input.value).replace(/\s+/g, ' ');
+  if (!name) return toast('請輸入工項名稱', true);
+  if (name.length > 40) return toast('工項名稱最多 40 個字', true);
+  const materials = uniqueMaterials([
+    ...chosenMaterials('newWorkMaterialChoices'),
+    ...parseManualMaterials(document.getElementById('newWorkManualMaterials').value),
+  ]);
+  if (materials.length && backendCapabilities.workMaterials !== true) {
+    return toast('後端仍是舊版，請先重新部署最新版 Code.gs，再新增工項與連動材料', true);
+  }
+  const button = document.getElementById('addWorkBtn');
+  button.disabled = true;
+  try {
+    await api('addWork', { name, materials });
+    input.value = '';
+    document.getElementById('newWorkManualMaterials').value = '';
+    await syncState();
+    initWorkOptions();
+    renderWorkItems();
+    calculate();
+    toast(`已新增工項：${name}`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+let editingWorkKey = '';
+
+function openWorkMaterials(key) {
+  const work = db.works.find((item) => item.key === key);
+  if (!work) return toast('找不到此工項，請重新整理', true);
+  editingWorkKey = key;
+  const excelMaterials = effectiveExcelMaterials(work);
+  const backendReady = backendCapabilities.workMaterials === true;
+  document.getElementById('workMaterialTitle').textContent = `設定「${work.name}」連動材料`;
+  document.getElementById('excelDetectedMaterials').innerHTML = excelMaterials.length
+    ? materialBadges(excelMaterials)
+    : '<span class="choice-empty">目前的 Excel 沒有自動辨識到材料</span>';
+  document.getElementById('backendWorkWarning').classList.toggle('hidden', backendReady);
+  document.getElementById('saveWorkMaterialsBtn').disabled = !backendReady;
+  document.getElementById('workManualMaterials').value = '';
+  renderMaterialChoices('workMaterialChoices', work.manualMaterials);
+  document.getElementById('workMaterialModal').classList.remove('hidden');
+}
+
+function closeWorkMaterials() {
+  editingWorkKey = '';
+  document.getElementById('workMaterialModal').classList.add('hidden');
+}
+
+async function saveWorkMaterials() {
+  const work = db.works.find((item) => item.key === editingWorkKey);
+  if (!work) return toast('找不到此工項，請重新整理', true);
+  if (backendCapabilities.workMaterials !== true) {
+    return toast('後端仍是舊版，請重新部署最新版 Code.gs 後再儲存', true);
+  }
+  const materials = uniqueMaterials([
+    ...chosenMaterials('workMaterialChoices'),
+    ...parseManualMaterials(document.getElementById('workManualMaterials').value),
+  ]);
+  const button = document.getElementById('saveWorkMaterialsBtn');
+  button.disabled = true;
+  try {
+    await api('setWorkMaterials', { key: work.key, materials });
+    await syncState();
+    renderWorkItems();
+    calculate();
+    closeWorkMaterials();
+    toast(`已更新「${work.name}」的連動材料`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function toggleWorkActive(key, active) {
+  if (!isAdmin()) return toast('只有後台管理帳號可以調整工項', true);
+  const work = db.works.find((item) => item.key === key);
+  if (!work) return toast('找不到此工項，請重新整理', true);
+  const warning = active
+    ? `確定恢復「${work.name}」供前端填報？`
+    : `確定停用「${work.name}」？前端選單會立即隱藏，但歷史回報仍會保留。`;
+  if (!window.confirm(warning)) return;
+  try {
+    await api('setWorkActive', { key, active });
+    await syncState();
+    initWorkOptions();
+    renderWorkItems();
+    calculate();
+    toast(active ? `已恢復工項：${work.name}` : `已停用工項：${work.name}`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderWorkItems() {
+  const root = document.getElementById('workList');
+  if (!root) return;
+  if (!isAdmin()) {
+    root.innerHTML = '';
+    return;
+  }
+  const works = [...db.works].sort((a, b) => n(a.sortOrder) - n(b.sortOrder)
+    || workLabel(a.key).localeCompare(workLabel(b.key), 'zh-TW'));
+  root.innerHTML = works.map((work) => {
+    const excelMaterials = effectiveExcelMaterials(work);
+    const materials = effectiveWorkMaterials(work);
+    return `
+    <div class="work-row">
+      <div>
+        <b>${esc(work.name)}</b>
+        ${excelMaterials.length ? '<span class="badge">Excel 自動辨識</span>' : (work.builtIn ? '<span class="badge">系統原有</span>' : '<span class="badge">後台新增</span>')}
+        <br><span class="work-storage">試算表儲存值：${esc(work.key)}</span>
+        <div class="work-materials"><span>連動材料</span>${materialBadges(materials)}</div>
+      </div>
+      <span class="role-chip ${work.active ? 'role-enabled' : 'role-disabled'}">${work.active ? '前端可填報' : '已停用'}</span>
+      <div class="work-actions">
+        <button class="btn" onclick="openWorkMaterials(decodeURIComponent('${encodeURIComponent(work.key)}'))">設定材料</button>
+        ${work.active
+          ? `<button class="btn danger" onclick="toggleWorkActive(decodeURIComponent('${encodeURIComponent(work.key)}'),false)">停用</button>`
+          : `<button class="btn primary" onclick="toggleWorkActive(decodeURIComponent('${encodeURIComponent(work.key)}'),true)">恢復</button>`}
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">尚未建立任何工項</div>';
+  renderMaterialChoices('newWorkMaterialChoices');
+}
+
 function floors() {
   const list = [...new Set(db.source.map((row) => row.floor))].sort((a, b) => n(a) - n(b));
   return list.length ? list : Array.from({ length: 13 }, (_, index) => String(index + 2));
@@ -516,7 +801,7 @@ function planImageFallback(image) {
   if (image.dataset.retried) return planImageFailed();
   image.dataset.retried = '1';
   assetPrefix = '';
-  image.src = 'floor-plan-04.png?v=20260831-1';
+  image.src = 'floor-plan-04.png?v=20260902-300ppi';
 }
 
 /**
@@ -525,6 +810,53 @@ function planImageFallback(image) {
  */
 let planRegions = null;
 let planSpots = SPACE_HOTSPOTS;
+
+const PLAN_SELECTION_GROUPS = {
+  'interior-11': {
+    label: '1-1區室內',
+    rooms: ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A31'],
+    codes: ['I', 'K', 'B'],
+  },
+  'interior-12': {
+    label: '1-2區室內',
+    rooms: ['A08', 'A09', 'A10', 'A11', 'A12', 'A13', 'A14', 'A15', 'A16', 'A17', 'A18', 'A19', 'A20'],
+    codes: ['I', 'K', 'B'],
+  },
+  'interior-2': {
+    label: '2區室內',
+    rooms: ['A21', 'A22', 'A23', 'A24', 'A25', 'A26', 'A27', 'A28', 'A29', 'A30'],
+    codes: ['I', 'K', 'B'],
+  },
+  'balcony-11': {
+    label: '1-1區陽臺',
+    rooms: ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A31'],
+    codes: ['Y'],
+  },
+  'balcony-12': {
+    label: '1-2區陽臺',
+    rooms: ['A08', 'A09', 'A10', 'A11', 'A12', 'A13', 'A14', 'A15', 'A16', 'A17', 'A18', 'A19', 'A20'],
+    codes: ['Y'],
+  },
+  'balcony-2': {
+    label: '2區陽臺',
+    rooms: ['A21', 'A22', 'A23', 'A24', 'A25', 'A26', 'A27', 'A28', 'A29', 'A30'],
+    codes: ['Y'],
+  },
+};
+
+function spotsForPlanGroup(groupKey, spots = planSpots) {
+  const group = PLAN_SELECTION_GROUPS[groupKey];
+  if (!group) return [];
+  const rooms = new Set(group.rooms);
+  const codes = new Set(group.codes);
+  const roomOrder = new Map(group.rooms.map((room, index) => [room, index]));
+  const codeOrder = new Map(group.codes.map((code, index) => [code, index]));
+  return (spots || [])
+    .filter((spot) => rooms.has(clean(spot.room)) && codes.has(spaceCode(spot)))
+    .sort((a, b) => roomOrder.get(a.room) - roomOrder.get(b.room)
+      || codeOrder.get(spaceCode(a)) - codeOrder.get(spaceCode(b))
+      || clean(a.label).localeCompare(clean(b.label), 'zh-TW'));
+}
 
 async function loadPlanRegions() {
   try {
@@ -591,9 +923,9 @@ function renderRegionShapes() {
   return `<svg class="plan-svg" viewBox="0 0 100 100" preserveAspectRatio="none">${shapes}</svg>${tags}`;
 }
 
-/* 平面圖縮放：舞台寬度改變時，百分比定位的標號會等比跟著縮放。 */
-const PLAN_STEPS = [1, 1.5, 2.25, 3.4, 5];
-let planZoomIndex = -1;
+/* 平面圖固定為 340%；舞台寬度改變時，百分比定位的標號仍會等比跟著縮放。 */
+const PLAN_SCALE = 3.4;
+let planZoomInitialized = false;
 
 function planBaseWidth() {
   const viewport = document.getElementById('planViewport');
@@ -609,14 +941,10 @@ function applyPlanZoom(keepCenter = true) {
   const ratioX = keepCenter ? (viewport.scrollLeft + viewport.clientWidth / 2) / previousWidth : 0.5;
   const ratioY = keepCenter ? (viewport.scrollTop + viewport.clientHeight / 2) / previousHeight : 0.5;
 
-  const width = Math.round(planBaseWidth() * PLAN_STEPS[planZoomIndex]);
+  const width = Math.round(planBaseWidth() * PLAN_SCALE);
   stage.style.width = `${width}px`;
   stage.style.minWidth = `${width}px`;
   stage.style.flexBasis = `${width}px`;
-  stage.classList.toggle('zoom-out', planZoomIndex === 0);
-
-  const label = document.getElementById('planZoomLabel');
-  if (label) label.textContent = `${Math.round(PLAN_STEPS[planZoomIndex] * 100)}%`;
 
   // 縮放後把原本在看的位置重新捲回畫面中央
   requestAnimationFrame(() => {
@@ -625,19 +953,14 @@ function applyPlanZoom(keepCenter = true) {
   });
 }
 
-function zoomPlan(delta) {
-  const next = planZoomIndex + delta;
-  if (next < 0 || next >= PLAN_STEPS.length) return;
-  planZoomIndex = next;
-  applyPlanZoom();
-}
-
 let planResizeTimer = 0;
 
 function initPlanZoom() {
-  if (planZoomIndex >= 0) return;
-  // 手機從「看得見全貌」開始，桌機直接給可點選的倍率
-  planZoomIndex = window.innerWidth <= 720 ? 0 : 2;
+  if (planZoomInitialized) {
+    applyPlanZoom(false);
+    return;
+  }
+  planZoomInitialized = true;
   applyPlanZoom(false);
   // 圖片尚未載完時 stage 高度是 0，置中會算到空白處；載完必須重算一次
   const image = document.getElementById("planImage");
@@ -686,7 +1009,25 @@ function togglePlanSpace(id) {
   calculate();
 }
 
+function selectPlanGroup(groupKey) {
+  const selector = document.getElementById('planGroup');
+  if (selector) selector.value = '';
+  if (!groupKey) return;
+  const group = PLAN_SELECTION_GROUPS[groupKey];
+  const spots = spotsForPlanGroup(groupKey);
+  if (!group || !spots.length) return toast('此區域目前沒有可選取的空間', true);
+  pickedSpotIds = new Set(spots.map((spot) => spot.id));
+  draftMaterials = {};
+  renderHotspots();
+  renderSelection();
+  calculate();
+  const roomCount = new Set(spots.map((spot) => spot.room)).size;
+  toast(`${group.label}：已選取 ${roomCount} 戶／${spots.length} 區`);
+}
+
 function clearSelection() {
+  const selector = document.getElementById('planGroup');
+  if (selector) selector.value = '';
   pickedSpotIds = new Set();
   draftMaterials = {};
   renderHotspots();
@@ -723,13 +1064,23 @@ function reportItems() {
 function materialItems() {
   const work = document.getElementById('work').value;
   const found = new Map();
-  selectedRows().forEach((row) => (row.materials?.[work] || []).forEach((material) => {
+  const aliases = workAliases(work);
+  selectedRows().forEach((row) => Object.entries(row.materials || {}).forEach(([sourceWork, materials]) => {
+    if (!aliases.has(workIdentity(sourceWork)) || !Array.isArray(materials)) return;
+    materials.forEach((material) => {
+      const key = `${work}|${material.category}|${material.name}|${material.unit}`;
+      if (!found.has(key)) found.set(key, { ...material, key, sourceRows: [], planned: 0 });
+      const item = found.get(key);
+      if (material.sourceCell && !item.sourceRows.includes(material.sourceCell)) item.sourceRows.push(material.sourceCell);
+      item.planned += n(material.planned);
+    });
+  }));
+  const selectedWork = db.works.find((item) => item.key === work);
+  const configured = selectedWork ? effectiveWorkMaterials(selectedWork) : sourceWorkMaterials(work);
+  configured.forEach((material) => {
     const key = `${work}|${material.category}|${material.name}|${material.unit}`;
     if (!found.has(key)) found.set(key, { ...material, key, sourceRows: [], planned: 0 });
-    const item = found.get(key);
-    item.sourceRows.push(material.sourceCell);
-    item.planned += n(material.planned);
-  }));
+  });
   return [...found.values()];
 }
 
@@ -743,13 +1094,11 @@ function calculate() {
     root.innerHTML = '<div class="material-warning">請直接點選平面圖中的施作空間；系統會列出對應材料，材料用量為選填。</div>';
     return;
   }
-  if (!db.source.length) {
-    root.innerHTML = '<div class="material-warning">尚未匯入數量明細 Excel；仍可只填出工人數送出。</div>';
-    return;
-  }
   const items = materialItems();
   if (!items.length) {
-    root.innerHTML = '<div class="material-warning">目前工項與區域沒有對應材料；仍可只填出工人數送出。</div>';
+    root.innerHTML = `<div class="material-warning">${db.source.length
+      ? '目前工項與區域沒有對應材料'
+      : '尚未匯入數量明細 Excel，且後台未設定連動材料'}；仍可只填出工人數送出。</div>`;
     return;
   }
   root.innerHTML = items.map((item) => `
@@ -826,8 +1175,10 @@ function submitReport() {
   const workersRaw = clean(document.getElementById('workers').value);
   const workers = n(workersRaw);
   const date = clean(document.getElementById('date').value);
+  const work = clean(document.getElementById('work').value);
   if (!reporterName) return toast('請填寫填表人姓名', true);
   if (!date) return toast('請選擇施工日期', true);
+  if (!work) return toast('目前沒有可填報的工項，請洽管理員', true);
   if (!spots.length) return toast('請直接從平面圖選擇至少一個施作空間', true);
   if (!workersRaw || workers < 0.5 || Math.abs(workers * 2 - Math.round(workers * 2)) > 1e-9) {
     return toast('出工人數須至少 0.5，並以 0.5 工為單位', true);
@@ -848,7 +1199,6 @@ function submitReport() {
     });
   }
   const items = reportItems();
-  const work = document.getElementById('work').value;
   const floor = document.getElementById('floor').value;
   const locations = buildReportLocations(work, floor, items);
   materials.forEach((material) => { material.allocations = allocateMaterial(material, locations); });
@@ -955,27 +1305,102 @@ function colName(index) {
 }
 
 function materialUnit(name, field) {
+  const unitMatch = clean(field).match(/[（(]\s*([^）)]+)\s*[）)]/);
+  if (unitMatch && !/數量|用量/.test(unitMatch[1])) return unitMatch[1];
   if (field.includes('箱')) return '箱';
   if (field.includes('塊')) return '塊';
+  if (/m[²2]|㎡|平方公尺/i.test(field)) return 'm²';
+  if (/m[³3]|立方公尺/i.test(field)) return 'm³';
+  if (/公斤|\bkg\b/i.test(field)) return 'kg';
+  if (/公升|\bL\b/.test(field)) return 'L';
   if (/砂/.test(name)) return 'm³';
   if (/A膠|B膠/.test(name)) return 'kg';
-  return '包';
+  if (/TF\d*|TG\d*|水泥|黏著|填縫|益膠泥/i.test(name)) return '包';
+  return '';
+}
+
+function normalizeExcelWork(excelWork) {
+  const text = clean(excelWork);
+  return ({
+    地磚: '磁磚-地磚',
+    壁磚: '磁磚-壁磚',
+    防水: '防水工程',
+    隔音地坪: '隔音地板',
+    隔音地墊: '隔音地板',
+  })[text] || text;
+}
+
+function excelWorkName(key, excelWork) {
+  return DEFAULT_WORKS.find((item) => item.key === key)?.name || clean(excelWork) || key;
+}
+
+function excelHeaderLayout(rows) {
+  const candidates = rows.slice(0, 10);
+  let fieldRowIndex = candidates.findIndex((row) => (
+    /樓層/.test(clean(row?.[0]))
+    && /房號/.test(clean(row?.[1]))
+    && /空間/.test(clean(row?.[2]))
+  ));
+  // 相容既有範本：第 5 列是欄位名稱。若使用者在上方增減標題列，則由樓層／房號／空間自動定位。
+  if (fieldRowIndex < 0) fieldRowIndex = Math.min(4, Math.max(0, rows.length - 2));
+
+  const positionCodes = /^(F|W|I|B|K|Y|廊|廳)$/i;
+  let workRowIndex = 1;
+  let bestWorkScore = -1;
+  for (let rowIndex = 0; rowIndex < fieldRowIndex; rowIndex += 1) {
+    const values = (rows[rowIndex] || []).slice(6).map(clean).filter(Boolean);
+    const textValues = values.filter((value) => !positionCodes.test(value));
+    const workWords = textValues.filter((value) => /工程|磁磚|地磚|壁磚|地坪|地板|打底|防水|隔音|油漆|清潔/.test(value));
+    const score = textValues.length + workWords.length * 3;
+    if (score > bestWorkScore) {
+      bestWorkScore = score;
+      workRowIndex = rowIndex;
+    }
+  }
+
+  let positionRowIndex = Math.min(workRowIndex + 1, fieldRowIndex - 1);
+  let bestPositionScore = -1;
+  for (let rowIndex = workRowIndex + 1; rowIndex < fieldRowIndex; rowIndex += 1) {
+    const score = (rows[rowIndex] || []).slice(6).filter((value) => positionCodes.test(clean(value))).length;
+    if (score > bestPositionScore) {
+      bestPositionScore = score;
+      positionRowIndex = rowIndex;
+    }
+  }
+  const categoryRowIndex = [...Array(fieldRowIndex).keys()]
+    .reverse()
+    .find((rowIndex) => rowIndex !== workRowIndex && rowIndex !== positionRowIndex) ?? positionRowIndex;
+  return { workRowIndex, positionRowIndex, categoryRowIndex, fieldRowIndex };
 }
 
 function buildWorkSchemas(rows) {
-  const workRow = rows[1] || [];
-  const positionRow = rows[2] || [];
-  const categoryRow = rows[3] || [];
-  const fieldRow = rows[4] || [];
-  const aliases = { 隔音地坪: '隔音地板' };
-  const allowed = ['防水工程', '磁磚-地磚', '磁磚-壁磚', '隔音地坪'];
+  const layout = excelHeaderLayout(rows);
+  const workRow = rows[layout.workRowIndex] || [];
+  const positionRow = rows[layout.positionRowIndex] || [];
+  const categoryRow = rows[layout.categoryRowIndex] || [];
+  const fieldRow = rows[layout.fieldRowIndex] || [];
   const starts = [];
   workRow.forEach((value, index) => {
     const text = clean(value);
-    if (allowed.includes(text)) starts.push({ excelWork: text, work: aliases[text] || text, start: index });
+    // 同一工項可能在 Excel 的每個材料欄重複顯示，也可能只出現在合併儲存格首欄。
+    // 連續同名欄只能建立一個工項區段，否則 CE:CG 的「打底」會被切成三段而漏料。
+    if (index >= 6 && text) {
+      const work = normalizeExcelWork(text);
+      const previous = starts.at(-1);
+      if (!previous || workIdentity(previous.work) !== workIdentity(work)) {
+        starts.push({ excelWork: text, work, name: excelWorkName(work, text), start: index, last: index });
+      } else {
+        previous.last = index;
+      }
+    }
   });
-  return starts.map((group, index) => {
-    const end = (starts[index + 1]?.start ?? fieldRow.length) - 1;
+  const schemas = starts.map((group, index) => {
+    const lastPositionColumn = positionRow.reduce((last, value, column) => (
+      column >= group.start && clean(value) ? column : last
+    ), group.last);
+    const end = starts[index + 1]
+      ? starts[index + 1].start - 1
+      : Math.max(group.last, lastPositionColumn);
     const meta = [];
     let category = '';
     let position = '';
@@ -985,28 +1410,48 @@ function buildWorkSchemas(rows) {
       meta.push({ column, position, category, field: clean(fieldRow[column]) });
     }
     const definitions = [];
-    meta.forEach((item) => {
-      if (item.category === '磁磚' && item.field === '型號') {
-        const quantity = meta.find((other) => other.category === '磁磚' && other.field === '數量(箱)')
-          || meta.find((other) => other.category === '磁磚' && other.field === '數量(塊)');
-        definitions.push({ kind: 'model', ...item, qtyCol: quantity?.column, unit: materialUnit('', quantity?.field || '') });
-      } else if (/^(TF|TG|A膠$|B膠$|隔-|底-)/.test(item.field)) {
-        definitions.push({ kind: 'named', name: item.field, ...item, unit: materialUnit(item.field, item.field) });
+    meta.forEach((item, metaIndex) => {
+      if (!item.field) return;
+      if (/^(型號|材料名稱|品名)$/.test(item.field)) {
+        const following = meta.slice(metaIndex + 1);
+        const nextMaterialField = following.findIndex((other) => /^(型號|材料名稱|品名)$/.test(other.field));
+        const sameMaterialColumns = nextMaterialField >= 0 ? following.slice(0, nextMaterialField) : following;
+        const quantity = sameMaterialColumns.find((other) => /^(數量|用量)/.test(other.field)
+          && (!item.category || !other.category || other.category === item.category));
+        if (quantity) {
+          definitions.push({
+            kind: 'model', ...item, qtyCol: quantity.column,
+            unit: materialUnit('', quantity.field),
+          });
+        }
+      } else if (!/^(數量|用量|單位|備註|合計|小計)/.test(item.field)
+        && !/面積|高度|寬度|周長/.test(item.field)) {
+        definitions.push({
+          kind: 'named', name: item.field, ...item,
+          unit: materialUnit(item.field, item.field),
+        });
       }
     });
-    return { ...group, end, definitions };
-  });
+    return { ...group, end, definitions, positions: meta.map((item) => item.position).filter(Boolean) };
+  }).filter((schema) => (
+    schema.definitions.length
+    && !/^(扣除面積|基本資料|各項係數設定|係數設定)$/.test(clean(schema.excelWork))
+  ));
+  // 讓匯入端能從實際偵測到的欄位列開始讀資料，同時保留陣列介面供既有程式使用。
+  schemas.dataStart = layout.fieldRowIndex + 1;
+  schemas.layout = layout;
+  return schemas;
 }
 
 function extractRowMaterials(row, rowNumber, schemas) {
   const output = {};
   schemas.forEach((schema) => {
-    const list = [];
+    const list = output[schema.work] || [];
     schema.definitions.forEach((definition) => {
       const raw = row[definition.column];
       if (definition.kind === 'model') {
         const model = clean(raw);
-        if (model && model !== '-' && !model.startsWith('#')) {
+        if (model && model !== '-' && model !== '0' && !model.startsWith('#')) {
           list.push({
             name: model,
             category: definition.category,
@@ -1030,6 +1475,28 @@ function extractRowMaterials(row, rowNumber, schemas) {
   return output;
 }
 
+function detectedWorksFromSource(source, schemas) {
+  const grouped = new Map();
+  schemas.forEach((schema) => {
+    if (!grouped.has(schema.work)) grouped.set(schema.work, {
+      key: schema.work, name: schema.name, materials: [],
+    });
+    const work = grouped.get(schema.work);
+    schema.definitions.filter((definition) => definition.kind === 'named').forEach((definition) => {
+      work.materials.push({
+        name: definition.name,
+        category: definition.category || '一般材料',
+        unit: definition.unit,
+      });
+    });
+  });
+  source.forEach((row) => Object.entries(row.materials || {}).forEach(([key, materials]) => {
+    if (!grouped.has(key)) grouped.set(key, { key, name: excelWorkName(key, key), materials: [] });
+    grouped.get(key).materials.push(...materials);
+  }));
+  return [...grouped.values()].map((work) => ({ ...work, materials: uniqueMaterials(work.materials) }));
+}
+
 async function importExcel(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -1046,11 +1513,9 @@ async function importExcel(event) {
       header: 1, defval: null, raw: true,
     });
     const schemas = buildWorkSchemas(rows);
-    if (!schemas.some((schema) => schema.work === '磁磚-壁磚'
-      && schema.definitions.some((definition) => definition.field === 'TF850'))) {
-      throw new Error('無法依表頭定位「磁磚-壁磚／TF850」');
-    }
-    const source = rows.slice(5).map((row, index) => ({ rowNumber: index + 6, row }))
+    if (!schemas.length) throw new Error('無法從表頭辨識工項與對應材料欄位');
+    const dataStart = schemas.dataStart ?? 5;
+    const source = rows.slice(dataStart).map((row, index) => ({ rowNumber: index + dataStart + 1, row }))
       .filter((item) => item.row[0] != null && item.row[1] != null && item.row[2] != null)
       .map(({ row, rowNumber }) => ({
         id: rowNumber,
@@ -1062,12 +1527,15 @@ async function importExcel(event) {
         area: n(row[5]),
         materials: extractRowMaterials(row, rowNumber, schemas),
       }));
-    await api('setSource', { source, sourceName: file.name });
+    const detectedWorks = detectedWorksFromSource(source, schemas);
+    await api('setSource', { source, sourceName: file.name, detectedWorks });
     await syncState();
     initFloor();
+    initWorkOptions();
     renderSource();
+    renderWorkItems();
     clearSelection();
-    toast(`已匯入並同步 ${db.source.length} 筆數量資料`);
+    toast(`已匯入 ${db.source.length} 筆資料，自動同步 ${detectedWorks.length} 個工項`);
   } catch (error) {
     toast(`匯入失敗：${error.message}`, true);
   } finally {
@@ -1079,20 +1547,36 @@ function sourceMaterialText(row, work) {
   return (row.materials?.[work] || []).map((item) => `${item.name}〔${item.sourceCell}〕`).join('、');
 }
 
+function sourceWorks() {
+  const keys = new Set();
+  db.source.forEach((row) => Object.entries(row.materials || {}).forEach(([key, materials]) => {
+    if (Array.isArray(materials) && materials.length) keys.add(key);
+  }));
+  const ordered = db.works.filter((work) => keys.delete(work.key));
+  keys.forEach((key) => ordered.push({ key, name: workLabel(key) }));
+  return ordered;
+}
+
 function renderSource() {
   document.getElementById('sourceName').textContent = db.sourceName || '尚未匯入';
   document.getElementById('sourceRows').textContent = `${db.source.length} 筆`;
   const floorList = [...new Set(db.source.map((row) => row.floor))].sort((a, b) => n(a) - n(b));
   document.getElementById('sourceFloors').textContent = floorList.length ? `${floorList[0]}F–${floorList.at(-1)}F` : '—';
+  const works = sourceWorks();
+  document.getElementById('sourceWorks').textContent = `${works.length} 項`;
+  document.getElementById('sourceHead').innerHTML = [
+    '<th>樓層</th><th>房號</th><th>空間</th><th>位置</th>',
+    ...works.map((work) => `<th>${esc(work.name)}材料</th>`),
+  ].join('');
   const query = clean(document.getElementById('sourceSearch').value).toLowerCase();
   const rows = db.source.filter((row) => !query || [
     row.floor, row.room, row.space, row.position,
-    sourceMaterialText(row, '磁磚-地磚'), sourceMaterialText(row, '磁磚-壁磚'), sourceMaterialText(row, '隔音地板'),
+    ...works.map((work) => sourceMaterialText(row, work.key)),
   ].join(' ').toLowerCase().includes(query));
   document.getElementById('sourceBody').innerHTML = rows.slice(0, 1000).map((row) => `
     <tr><td>${esc(row.floor)}F</td><td>${esc(row.room)}</td><td>${esc(row.space)}</td><td>${esc(row.position)}</td>
-    <td>${esc(sourceMaterialText(row, '磁磚-地磚'))}</td><td>${esc(sourceMaterialText(row, '磁磚-壁磚'))}</td><td>${esc(sourceMaterialText(row, '隔音地板'))}</td></tr>`).join('')
-    || '<tr><td colspan="7"><div class="empty">尚無資料</div></td></tr>';
+    ${works.map((work) => `<td>${esc(sourceMaterialText(row, work.key))}</td>`).join('')}</tr>`).join('')
+    || `<tr><td colspan="${4 + works.length}"><div class="empty">尚無資料</div></td></tr>`;
 }
 
 function reportLocations(report) {
