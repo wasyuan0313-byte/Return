@@ -181,6 +181,42 @@ function effectiveWorkMaterials(work) {
   return uniqueMaterials([...(work?.materials || []), ...(work?.manualMaterials || []), ...effectiveExcelMaterials(work)]);
 }
 
+/**
+ * 舊版後端可能已保存 source，卻尚未把後來辨識到的工項建立到 works。
+ * 前端先以 source 補齊顯示；新版後端的登入修復會同步把它正式寫回 Google Sheet。
+ */
+function worksWithSource(configuredWorks, rows) {
+  const works = (configuredWorks || []).map(normalizeWorkItem);
+  const identities = new Set();
+  works.forEach((work) => workAliases(work).forEach((alias) => identities.add(alias)));
+  const recovered = new Map();
+  (rows || []).forEach((row) => Object.entries(row.materials || {}).forEach(([key, materials]) => {
+    if (!Array.isArray(materials) || !materials.length) return;
+    const normalizedKey = normalizeExcelWork(key);
+    const identity = workIdentity(normalizedKey);
+    const current = recovered.get(identity) || { key: normalizedKey, materials: [] };
+    current.materials.push(...materials);
+    recovered.set(identity, current);
+  }));
+  recovered.forEach(({ key: normalizedKey, materials }, identity) => {
+    if (identities.has(identity)) return;
+    const work = normalizeWorkItem({
+      key: normalizedKey,
+      name: excelWorkName(normalizedKey, normalizedKey),
+      active: true,
+      sortOrder: works.length + 1,
+      builtIn: false,
+      manualMaterials: [],
+      excelMaterials: uniqueMaterials(materials),
+      materials: uniqueMaterials(materials),
+      recoveredFromSource: true,
+    });
+    works.push(work);
+    workAliases(work).forEach((alias) => identities.add(alias));
+  });
+  return works;
+}
+
 function spaceCode(value) {
   const text = clean(typeof value === 'object' ? value.code || value.label : value);
   if (['B', 'K', 'I', 'Y', '廊', '廳'].includes(text)) return text;
@@ -248,13 +284,15 @@ function setConnection(ok, text) {
 async function syncState() {
   const state = await api('state');
   authUser = state.currentUser || null;
+  const source = Array.isArray(state.source) ? state.source : [];
+  const configuredWorks = Array.isArray(state.works) && state.works.length
+    ? state.works
+    : DEFAULT_WORKS;
   db = {
     reports: Array.isArray(state.reports) ? state.reports : [],
-    source: Array.isArray(state.source) ? state.source : [],
+    source,
     sourceName: state.sourceName || '',
-    works: (Array.isArray(state.works) && state.works.length
-      ? state.works
-      : DEFAULT_WORKS).map(normalizeWorkItem),
+    works: worksWithSource(configuredWorks, source),
     users: Array.isArray(state.users) ? state.users : [],
   };
   backendCapabilities = state.capabilities || {};
@@ -1385,10 +1423,15 @@ function buildWorkSchemas(rows) {
     // 同一工項可能在 Excel 的每個材料欄重複顯示，也可能只出現在合併儲存格首欄。
     // 連續同名欄只能建立一個工項區段，否則 CE:CG 的「打底」會被切成三段而漏料。
     if (index >= 6 && text) {
-      const work = normalizeExcelWork(text);
+      const field = clean(fieldRow[index]);
+      const columnCategory = clean(categoryRow[index]);
+      // 有些版本的 CG2 誤填為「地磚」，但 CG4/CG5 明確是「打底／底-砂」。
+      // 材料欄證據較具體，遇到這種不一致時以材料分類與「底-」前綴校正歸屬。
+      const inferredText = /^底\s*[-－]/.test(field) || columnCategory === '打底' ? '打底' : text;
+      const work = normalizeExcelWork(inferredText);
       const previous = starts.at(-1);
       if (!previous || workIdentity(previous.work) !== workIdentity(work)) {
-        starts.push({ excelWork: text, work, name: excelWorkName(work, text), start: index, last: index });
+        starts.push({ excelWork: inferredText, work, name: excelWorkName(work, inferredText), start: index, last: index });
       } else {
         previous.last = index;
       }
@@ -1433,10 +1476,7 @@ function buildWorkSchemas(rows) {
       }
     });
     return { ...group, end, definitions, positions: meta.map((item) => item.position).filter(Boolean) };
-  }).filter((schema) => (
-    schema.definitions.length
-    && !/^(扣除面積|基本資料|各項係數設定|係數設定)$/.test(clean(schema.excelWork))
-  ));
+  }).filter((schema) => !/^(扣除面積|基本資料|各項係數設定|係數設定)$/.test(clean(schema.excelWork)));
   // 讓匯入端能從實際偵測到的欄位列開始讀資料，同時保留陣列介面供既有程式使用。
   schemas.dataStart = layout.fieldRowIndex + 1;
   schemas.layout = layout;
@@ -1550,7 +1590,8 @@ function sourceMaterialText(row, work) {
 function sourceWorks() {
   const keys = new Set();
   db.source.forEach((row) => Object.entries(row.materials || {}).forEach(([key, materials]) => {
-    if (Array.isArray(materials) && materials.length) keys.add(key);
+    // 工項可能只有施作面積而沒有材料欄（例如防水工程），仍屬於 Excel 已辨識工項。
+    if (Array.isArray(materials)) keys.add(key);
   }));
   const ordered = db.works.filter((work) => keys.delete(work.key));
   keys.forEach((key) => ordered.push({ key, name: workLabel(key) }));
