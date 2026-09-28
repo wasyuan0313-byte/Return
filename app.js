@@ -1977,6 +1977,30 @@ function reportLocationArea(location) {
   return matching.reduce((sum, row) => sum + sourceWidth(row), 0);
 }
 
+function sourceRowHasWorkMaterials(row, work) {
+  const aliases = workAliases(work);
+  return Object.entries(row?.materials || {}).some(([sourceWork, materials]) => (
+    aliases.has(workIdentity(sourceWork)) && Array.isArray(materials) && materials.length
+  ));
+}
+
+/**
+ * 統計總表依工項計算施作面積：有材料對應的工項，只加總該工項有連動材料的來源列；
+ * 若整個工項沒有材料欄（例如只有面積的工項），則沿用所選位置的施作面積。
+ */
+function reportLocationWorkArea(location, work = location.work) {
+  const positions = clean(location.position)
+    .split(/[、,，/]+/).map(clean).filter(Boolean);
+  const matching = db.source.filter((row) => row.floor === clean(location.floor)
+    && row.room === clean(location.room)
+    && spaceCode(row.space) === spaceCode(location.code)
+    && (!positions.length || !clean(row.position) || positions.includes(clean(row.position))));
+  const linked = matching.filter((row) => sourceRowHasWorkMaterials(row, work));
+  const workHasMaterialColumns = sourceWorkMaterials(work).length > 0;
+  const selected = linked.length || workHasMaterialColumns ? linked : matching;
+  return selected.reduce((sum, row) => sum + sourceWidth(row), 0);
+}
+
 function uniqueText(values, compareNumeric = false) {
   return [...new Set(values.map(clean).filter(Boolean))].sort((a, b) => (
     compareNumeric ? n(a) - n(b) : a.localeCompare(b, 'zh-TW', { numeric: true })
@@ -2125,31 +2149,55 @@ function feedbackDetailRows() {
     || a.material.localeCompare(b.material, 'zh-TW', { numeric: true }));
 }
 
-/** 第三分頁：日期是唯一彙總層級；出工數與材料量採每筆回報直接加總。 */
-function dailySummaryRows(materialColumns = actualMaterialColumns()) {
+/** 第三分頁：依「日期＋工項」彙總，面積只計入該工項所連動的材料區域。 */
+function dailyWorkSummaryRows(materialColumns = actualMaterialColumns()) {
   const grouped = new Map();
   db.reports.forEach((report) => {
     const date = clean(report.date);
-    if (!grouped.has(date)) grouped.set(date, {
-      date, area: 0, workers: 0, areaKeys: new Set(), materials: new Map(),
+    const workKey = clean(report.work);
+    const groupKey = `${date}||${workIdentity(workKey)}`;
+    if (!grouped.has(groupKey)) grouped.set(groupKey, {
+      date, workKey, work: workLabel(workKey), area: 0, workers: 0,
+      areaKeys: new Set(), materials: new Map(),
     });
-    const row = grouped.get(date);
+    const row = grouped.get(groupKey);
     row.workers += n(report.workers);
     reportLocations(report).forEach((location) => {
-      const key = reportLocationKey(location);
+      const normalizedLocation = { ...location, work: location.work || workKey };
+      const key = reportLocationKey(normalizedLocation);
       if (row.areaKeys.has(key)) return;
       row.areaKeys.add(key);
-      row.area += reportLocationArea(location);
+      row.area += reportLocationWorkArea(normalizedLocation, workKey);
     });
     (report.materials || []).forEach((material) => {
       const key = materialSummaryKey(material);
       row.materials.set(key, (row.materials.get(key) || 0) + n(material.qty));
     });
   });
-  return [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date)).map((row) => ({
+  const workOrder = new Map(db.works.map((work, index) => [workIdentity(work.key), index]));
+  return [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date)
+    || (workOrder.get(workIdentity(a.workKey)) ?? Number.MAX_SAFE_INTEGER)
+      - (workOrder.get(workIdentity(b.workKey)) ?? Number.MAX_SAFE_INTEGER)
+    || a.work.localeCompare(b.work, 'zh-TW')).map((row) => ({
     ...row,
     materialValues: materialColumns.map((column) => row.materials.get(column.key) || 0),
   }));
+}
+
+/** 第四分頁仍以日期為單位，資料由第三分頁各工項加總。 */
+function dailySummaryRows(materialColumns = actualMaterialColumns(), workRows = dailyWorkSummaryRows(materialColumns)) {
+  const grouped = new Map();
+  workRows.forEach((workRow) => {
+    if (!grouped.has(workRow.date)) grouped.set(workRow.date, {
+      date: workRow.date, area: 0, workers: 0,
+      materialValues: materialColumns.map(() => 0),
+    });
+    const row = grouped.get(workRow.date);
+    row.area += n(workRow.area);
+    row.workers += n(workRow.workers);
+    workRow.materialValues.forEach((quantity, index) => { row.materialValues[index] += n(quantity); });
+  });
+  return [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function exportSheetStyle(rowIndex, centered = true) {
@@ -2222,17 +2270,17 @@ function buildFeedbackSheet(rows) {
 
 function buildDailySummarySheet(rows, materialColumns) {
   const headers = [
-    '施工日期', '施作總面積（m²）', '出工總人數（工）',
+    '施工日期', '工項', '施作總面積（m²）', '出工總人數（工）',
     ...materialColumns.map((column) => `${column.name}${column.unit ? `（${column.unit}）` : ''}`),
   ];
   const values = [headers, ...rows.map((row) => [
-    row.date, row.area, row.workers, ...row.materialValues,
+    row.date, row.work, row.area, row.workers, ...row.materialValues,
   ])];
   const numberFormats = {};
-  headers.slice(1).forEach((_, index) => { numberFormats[index + 1] = '0.0'; });
+  headers.slice(2).forEach((_, index) => { numberFormats[index + 2] = '0.0'; });
   return buildFlatReportSheet(
     values,
-    [13, 18, 17, ...materialColumns.map((column) => Math.max(13, column.name.length * 2 + 7))],
+    [13, 15, 18, 17, ...materialColumns.map((column) => Math.max(13, column.name.length * 2 + 7))],
     numberFormats,
   );
 }
@@ -2242,7 +2290,7 @@ function average(values) {
   return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : 0;
 }
 
-function buildUnitAnalysisSheet(rows, materialColumns) {
+function buildUnitAnalysisSheet(rows, materialColumns, summaryRowCount = rows.length) {
   const headers = [
     '施工日期', '施作總面積（m²）', '工率（m²／工）',
     ...materialColumns.map((column) => `${column.name}（m²／${column.unit || '單位'}）`),
@@ -2274,18 +2322,18 @@ function buildUnitAnalysisSheet(rows, materialColumns) {
 
   rows.forEach((row, index) => {
     const excelRow = index + 2;
-    const summaryRow = index + 2;
+    const summaryEndRow = Math.max(2, summaryRowCount + 1);
     const areaCell = XLSX.utils.encode_cell({ r: excelRow - 1, c: 1 });
-    sheet[areaCell].f = `'統計總表'!B${summaryRow}`;
+    sheet[areaCell].f = `SUMIF('統計總表'!$A$2:$A$${summaryEndRow},A${excelRow},'統計總表'!$C$2:$C$${summaryEndRow})`;
     sheet[areaCell].v = row.area;
     const workerRateCell = XLSX.utils.encode_cell({ r: excelRow - 1, c: 2 });
-    sheet[workerRateCell].f = `IF('統計總表'!C${summaryRow}=0,"",ROUND(B${excelRow}/'統計總表'!C${summaryRow},0))`;
+    sheet[workerRateCell].f = `IF(SUMIF('統計總表'!$A$2:$A$${summaryEndRow},A${excelRow},'統計總表'!$D$2:$D$${summaryEndRow})=0,"",ROUND(B${excelRow}/SUMIF('統計總表'!$A$2:$A$${summaryEndRow},A${excelRow},'統計總表'!$D$2:$D$${summaryEndRow}),0))`;
     sheet[workerRateCell].v = row.workers > 0 ? Math.round(row.area / row.workers) : '';
     materialColumns.forEach((column, materialIndex) => {
       const columnIndex = materialIndex + 3;
-      const summaryColumn = colName(materialIndex + 3);
+      const summaryColumn = colName(materialIndex + 4);
       const address = XLSX.utils.encode_cell({ r: excelRow - 1, c: columnIndex });
-      sheet[address].f = `IF('統計總表'!${summaryColumn}${summaryRow}=0,"",ROUND(B${excelRow}/'統計總表'!${summaryColumn}${summaryRow},0))`;
+      sheet[address].f = `IF(SUMIF('統計總表'!$A$2:$A$${summaryEndRow},A${excelRow},'統計總表'!$${summaryColumn}$2:$${summaryColumn}$${summaryEndRow})=0,"",ROUND(B${excelRow}/SUMIF('統計總表'!$A$2:$A$${summaryEndRow},A${excelRow},'統計總表'!$${summaryColumn}$2:$${summaryColumn}$${summaryEndRow}),0))`;
       sheet[address].v = row.materialValues[materialIndex] > 0
         ? Math.round(row.area / row.materialValues[materialIndex]) : '';
     });
@@ -2314,12 +2362,13 @@ function buildReportWorkbook() {
   const materialColumns = actualMaterialColumns();
   const submissions = submissionDetailRows();
   const feedback = feedbackDetailRows();
-  const summaries = dailySummaryRows(materialColumns);
+  const workSummaries = dailyWorkSummaryRows(materialColumns);
+  const summaries = dailySummaryRows(materialColumns, workSummaries);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, buildSubmissionSheet(submissions), '填列明細表');
   XLSX.utils.book_append_sheet(workbook, buildFeedbackSheet(feedback), '後台回饋明細');
-  XLSX.utils.book_append_sheet(workbook, buildDailySummarySheet(summaries, materialColumns), '統計總表');
-  XLSX.utils.book_append_sheet(workbook, buildUnitAnalysisSheet(summaries, materialColumns), '單位用量分析');
+  XLSX.utils.book_append_sheet(workbook, buildDailySummarySheet(workSummaries, materialColumns), '統計總表');
+  XLSX.utils.book_append_sheet(workbook, buildUnitAnalysisSheet(summaries, materialColumns, workSummaries.length), '單位用量分析');
   workbook.Props = {
     Title: '東仁安居工務回報紀錄',
     Subject: '填列明細、每日回饋、每日統計與單位用量分析',
@@ -2331,7 +2380,7 @@ function buildReportWorkbook() {
     workbook,
     submissionCount: submissions.length,
     feedbackCount: feedback.length,
-    summaryCount: summaries.length,
+    summaryCount: workSummaries.length,
   };
 }
 
