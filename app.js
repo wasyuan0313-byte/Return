@@ -21,6 +21,7 @@ let sessionToken = localStorage.getItem(TOKEN_KEY) || '';
 let backendCapabilities = {};
 let pickedSpotIds = new Set();
 let draftMaterials = {};
+let draftSandMeasurements = {};
 let pendingReport = null;
 
 const S = (room, suffix, label, code, x, y, diagramLabel = label) => ({
@@ -81,6 +82,16 @@ function fmt(value, digits = 3) {
   return n(value).toLocaleString('zh-TW', { maximumFractionDigits: digits });
 }
 
+function roundTo(value, digits = 1) {
+  const factor = 10 ** digits;
+  return Math.round((n(value) + Number.EPSILON) * factor) / factor;
+}
+
+function resetMaterialDrafts() {
+  draftMaterials = {};
+  draftSandMeasurements = {};
+}
+
 function today() {
   return new Date().toLocaleDateString('sv-SE');
 }
@@ -100,15 +111,6 @@ function workLabel(work) {
     '磁磚-壁磚': '壁磚',
     防水工程: '防水',
     隔音地板: '隔音地墊',
-  })[work] || work;
-}
-
-function exportWorkLabel(work) {
-  return ({
-    '磁磚-地磚': '地磚',
-    '磁磚-壁磚': '壁磚',
-    防水工程: '防水',
-    隔音地板: '隔音地板',
   })[work] || work;
 }
 
@@ -612,7 +614,7 @@ function initWorkOptions() {
     : '<option value="">目前沒有可填報的工項</option>';
   element.disabled = !works.length;
   if (works.some((work) => work.key === old)) element.value = old;
-  if (element.value !== old) draftMaterials = {};
+  if (element.value !== old) resetMaterialDrafts();
 }
 
 function materialCatalog() {
@@ -812,7 +814,7 @@ function selectedSpots() {
 /**
  * 靜態檔案位置容錯。
  * 正常結構是 assets/xxx；但用 GitHub 網頁拖曳上傳時資料夾常被攤平成根目錄，
- * 兩種都要能載入，否則平面圖與 Excel 匯出會直接壞掉。
+ * 兩種都要能載入，否則平面圖或 Excel 元件會直接壞掉。
  */
 let assetPrefix = 'assets/';
 
@@ -1018,7 +1020,7 @@ function planImageFailed() {
   help.classList.add('plan-error');
   help.innerHTML = '⚠ <b>平面圖載入失敗</b><br>網站上找不到 <code>assets/floor-plan-04.png</code>。'
     + '請確認上傳到 GitHub 時，<b>整個 <code>assets/</code> 資料夾</b>都有一起上傳'
-    + '（裡面還有 Excel 匯出要用的 <code>xlsx.full.min.js</code> 與 <code>report-template.xlsx</code>）。';
+    + '（裡面還有 Excel 匯入／匯出要用的 <code>xlsx.full.min.js</code>）。';
 }
 
 function renderHotspots() {
@@ -1032,7 +1034,7 @@ function renderHotspots() {
 
 function renderPlanState() {
   pickedSpotIds = new Set();
-  draftMaterials = {};
+  resetMaterialDrafts();
   renderHotspots();
   renderSelection();
   calculate();
@@ -1041,7 +1043,7 @@ function renderPlanState() {
 function togglePlanSpace(id) {
   if (pickedSpotIds.has(id)) pickedSpotIds.delete(id);
   else pickedSpotIds.add(id);
-  draftMaterials = {};
+  resetMaterialDrafts();
   renderHotspots();
   renderSelection();
   calculate();
@@ -1055,7 +1057,7 @@ function selectPlanGroup(groupKey) {
   const spots = spotsForPlanGroup(groupKey);
   if (!group || !spots.length) return toast('此區域目前沒有可選取的空間', true);
   pickedSpotIds = new Set(spots.map((spot) => spot.id));
-  draftMaterials = {};
+  resetMaterialDrafts();
   renderHotspots();
   renderSelection();
   calculate();
@@ -1067,7 +1069,7 @@ function clearSelection() {
   const selector = document.getElementById('planGroup');
   if (selector) selector.value = '';
   pickedSpotIds = new Set();
-  draftMaterials = {};
+  resetMaterialDrafts();
   renderHotspots();
   renderSelection();
   calculate();
@@ -1126,6 +1128,74 @@ function updateMaterial(key, value) {
   draftMaterials[key] = value;
 }
 
+function isSandMaterial(material) {
+  const name = clean(material?.name);
+  return /砂$/.test(name) && !/砂漿$/.test(name);
+}
+
+function sandShapeLabel(shape) {
+  return shape === 'cone' ? '錐形' : '方形';
+}
+
+function sandVolume(shape, length, width, height) {
+  const baseVolume = n(length) * n(width) * n(height);
+  return roundTo(shape === 'cone' ? baseVolume / 3 : baseVolume, 1);
+}
+
+function sandMeasurement(key) {
+  return draftSandMeasurements[key] || {
+    shape: '', length: '', width: '', height: '',
+  };
+}
+
+function updateSandMeasurement(key, field, value) {
+  draftSandMeasurements[key] = { ...sandMeasurement(key), [field]: value };
+}
+
+function sandResultText(measurement) {
+  if (!measurement?.shape || !(n(measurement.length) > 0)
+    || !(n(measurement.width) > 0) || !(n(measurement.height) > 0)) {
+    return '請選擇形狀並輸入長、寬、高';
+  }
+  return `計算結果 ${fmt(sandVolume(
+    measurement.shape, measurement.length, measurement.width, measurement.height,
+  ))} m³`;
+}
+
+function updateSandResult(index, key) {
+  const output = document.getElementById(`sandResult${index}`);
+  if (output) output.textContent = sandResultText(sandMeasurement(key));
+}
+
+function renderSandInput(item, index) {
+  const measurement = sandMeasurement(item.key);
+  const encodedKey = encodeURIComponent(item.key);
+  const disabled = measurement.shape ? '' : 'disabled';
+  const dimensionInput = (field, label) => `
+    <label><span>${label}</span><input type="number" min="0" step="0.001" placeholder="0"
+      value="${esc(measurement[field])}" ${disabled}
+      oninput="updateSandMeasurement(decodeURIComponent('${encodedKey}'),'${field}',this.value);updateSandResult(${index},decodeURIComponent('${encodedKey}'))"></label>`;
+  return `
+    <div class="sand-entry">
+      <div class="sand-shapes" role="radiogroup" aria-label="${esc(item.name)}堆置形狀">
+        <label><input type="radio" name="sandShape${index}" value="box" ${measurement.shape === 'box' ? 'checked' : ''}
+          onchange="updateSandMeasurement(decodeURIComponent('${encodedKey}'),'shape','box');calculate()">方形（單位 m）</label>
+        <label><input type="radio" name="sandShape${index}" value="cone" ${measurement.shape === 'cone' ? 'checked' : ''}
+          onchange="updateSandMeasurement(decodeURIComponent('${encodedKey}'),'shape','cone');calculate()">錐形（單位 m）</label>
+      </div>
+      <div class="sand-dimensions">
+        ${dimensionInput('length', '長')}${dimensionInput('width', '寬')}${dimensionInput('height', '高')}
+      </div>
+      <output id="sandResult${index}" class="sand-result">${esc(sandResultText(measurement))}</output>
+    </div>`;
+}
+
+function materialConfirmationText(material) {
+  if (!material?.measurement) return `${material.name} ${fmt(material.qty)}${material.unit}`;
+  const measurement = material.measurement;
+  return `${material.name}：${sandShapeLabel(measurement.shape)}，長 ${fmt(measurement.length)} m、寬 ${fmt(measurement.width)} m、高 ${fmt(measurement.height)} m，計算結果 ${fmt(material.qty)} m³`;
+}
+
 function calculate() {
   const root = document.getElementById('materials');
   if (!selectedSpots().length) {
@@ -1139,10 +1209,12 @@ function calculate() {
       : '尚未匯入數量明細 Excel，且後台未設定連動材料'}；仍可只填出工人數送出。</div>`;
     return;
   }
-  root.innerHTML = items.map((item) => `
-    <div class="material-line">
+  root.innerHTML = items.map((item, index) => `
+    <div class="material-line${isSandMaterial(item) ? ' sand-material-line' : ''}">
       <div><div class="mat-name">${esc(item.name)}</div><div class="mat-meta">${esc(item.category)}</div></div>
-      <div class="mat-input"><input type="number" min="0" step="0.1" placeholder="0" value="${esc(draftMaterials[item.key] ?? '')}" oninput="updateMaterial(decodeURIComponent('${encodeURIComponent(item.key)}'),this.value)"><span>${esc(item.unit)}</span></div>
+      ${isSandMaterial(item)
+    ? renderSandInput(item, index)
+    : `<div class="mat-input"><input type="number" min="0" step="0.1" placeholder="0" value="${esc(draftMaterials[item.key] ?? '')}" oninput="updateMaterial(decodeURIComponent('${encodeURIComponent(item.key)}'),this.value)"><span>${esc(item.unit)}</span></div>`}
     </div>`).join('');
 }
 
@@ -1224,6 +1296,35 @@ function submitReport() {
   const listed = materialItems();
   const materials = [];
   for (const item of listed) {
+    if (isSandMaterial(item)) {
+      const measurement = sandMeasurement(item.key);
+      const hasInput = Boolean(measurement.shape || clean(measurement.length)
+        || clean(measurement.width) || clean(measurement.height));
+      if (!hasInput) continue;
+      if (!measurement.shape) return toast(`${item.name} 請選擇方形或錐形`, true);
+      if (!(n(measurement.length) > 0) || !(n(measurement.width) > 0) || !(n(measurement.height) > 0)) {
+        return toast(`${item.name} 的長、寬、高都必須大於 0`, true);
+      }
+      const quantity = sandVolume(
+        measurement.shape, measurement.length, measurement.width, measurement.height,
+      );
+      materials.push({
+        name: item.name,
+        category: item.category,
+        unit: item.unit,
+        qty: quantity,
+        sourceRows: item.sourceRows,
+        measurement: {
+          shape: measurement.shape,
+          length: n(measurement.length),
+          width: n(measurement.width),
+          height: n(measurement.height),
+          inputUnit: 'm',
+          resultUnit: 'm³',
+        },
+      });
+      continue;
+    }
     const raw = draftMaterials[item.key];
     if (raw === '' || raw == null) continue;
     const quantity = n(raw);
@@ -1254,16 +1355,20 @@ function submitReport() {
     note: clean(document.getElementById('note').value),
   };
   const locationText = items.map((item) => `${item.room}（${item.spaces.map((space) => space.label).join('、')}）`).join('；');
-  const materialText = materials.length
-    ? materials.map((item) => `${item.name} ${fmt(item.qty)}${item.unit}`).join('、')
-    : '未填列材料用量';
+  const regularMaterials = materials.filter((material) => !material.measurement);
+  const sandMaterials = materials.filter((material) => material.measurement);
+  const materialText = regularMaterials.length
+    ? regularMaterials.map(materialConfirmationText).join('；')
+    : '未填列其他材料用量';
+  const sandText = sandMaterials.map(materialConfirmationText).join('；');
   document.getElementById('confirmSummary').innerHTML = `
     <dt>填表人</dt><dd>${esc(pendingReport.reporter)}</dd>
     <dt>施工日期</dt><dd>${esc(pendingReport.date)}</dd>
     <dt>樓層／工項</dt><dd>${esc(pendingReport.floor)}F／${esc(workLabel(pendingReport.work))}</dd>
     <dt>施作區域</dt><dd>${esc(locationText)}</dd>
     <dt>出工人數</dt><dd>${fmt(pendingReport.workers)} 工</dd>
-    <dt>材料用量</dt><dd>${esc(materialText)}</dd>`;
+    <dt>材料用量</dt><dd>${esc(materialText)}</dd>
+    ${sandText ? `<dt>砂用量</dt><dd>${esc(sandText)}</dd>` : ''}`;
   document.getElementById('confirmSubmitBtn').disabled = false;
   document.getElementById('confirmModal').classList.remove('hidden');
 }
@@ -1417,6 +1522,8 @@ function buildWorkSchemas(rows) {
   const positionRow = rows[layout.positionRowIndex] || [];
   const categoryRow = rows[layout.categoryRowIndex] || [];
   const fieldRow = rows[layout.fieldRowIndex] || [];
+  // 「寬度」屬於前段基本資料；不要誤抓後方工項區塊內可能出現的同名欄位。
+  const detectedWidthColumn = fieldRow.slice(0, 6).findIndex((value) => /寬度/.test(clean(value)));
   const starts = [];
   workRow.forEach((value, index) => {
     const text = clean(value);
@@ -1452,6 +1559,7 @@ function buildWorkSchemas(rows) {
       if (clean(categoryRow[column])) category = clean(categoryRow[column]);
       meta.push({ column, position, category, field: clean(fieldRow[column]) });
     }
+    const areaDefinitions = meta.filter((item) => /面積/.test(item.field));
     const definitions = [];
     meta.forEach((item, metaIndex) => {
       if (!item.field) return;
@@ -1475,11 +1583,18 @@ function buildWorkSchemas(rows) {
         });
       }
     });
-    return { ...group, end, definitions, positions: meta.map((item) => item.position).filter(Boolean) };
+    return {
+      ...group,
+      end,
+      definitions,
+      areaDefinitions,
+      positions: meta.map((item) => item.position).filter(Boolean),
+    };
   }).filter((schema) => !/^(扣除面積|基本資料|各項係數設定|係數設定)$/.test(clean(schema.excelWork)));
   // 讓匯入端能從實際偵測到的欄位列開始讀資料，同時保留陣列介面供既有程式使用。
   schemas.dataStart = layout.fieldRowIndex + 1;
   schemas.layout = layout;
+  schemas.widthColumn = detectedWidthColumn >= 0 ? detectedWidthColumn : 5;
   return schemas;
 }
 
@@ -1515,6 +1630,42 @@ function extractRowMaterials(row, rowNumber, schemas) {
   return output;
 }
 
+function extractRowSourceWidth(row, schemas) {
+  return n(row[schemas.widthColumn ?? 5]);
+}
+
+/**
+ * 舊版已匯入的 sourceJson 沒有 width，但第三分頁快照一直保留 A:F。
+ * 匯出時由快照依原列號補回寬度，避免使用者必須再次匯入同一份 Excel。
+ */
+function sourceWidthsFromSheet(sourceSheet) {
+  const rows = XLSX.utils.sheet_to_json(sourceSheet, {
+    header: 1, defval: null, raw: true,
+  });
+  const layout = excelHeaderLayout(rows);
+  const fieldRow = rows[layout.fieldRowIndex] || [];
+  const detectedWidthColumn = fieldRow.slice(0, 6).findIndex((value) => /寬度/.test(clean(value)));
+  const widthColumn = detectedWidthColumn >= 0 ? detectedWidthColumn : 5;
+  const widths = new Map();
+  rows.slice(layout.fieldRowIndex + 1).forEach((row, offset) => {
+    if (row?.[0] == null || row?.[1] == null || row?.[2] == null) return;
+    widths.set(layout.fieldRowIndex + 2 + offset, n(row[widthColumn]));
+  });
+  return widths;
+}
+
+function hydrateSourceWidthsFromSheet(sourceSheet) {
+  const widths = sourceWidthsFromSheet(sourceSheet);
+  let count = 0;
+  db.source.forEach((row) => {
+    const rowNumber = Number(row.rowNumber ?? row.id);
+    if (!widths.has(rowNumber)) return;
+    row.width = widths.get(rowNumber);
+    count += 1;
+  });
+  return count;
+}
+
 function detectedWorksFromSource(source, schemas) {
   const grouped = new Map();
   schemas.forEach((schema) => {
@@ -1546,10 +1697,13 @@ async function importExcel(event) {
   }
   try {
     if (typeof XLSX === 'undefined') throw new Error('Excel 元件尚未載入');
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const workbook = XLSX.read(await file.arrayBuffer(), {
+      type: 'array', cellStyles: true, cellFormula: true, cellNF: true,
+    });
     const sheetName = workbook.SheetNames.find((name) => name.trim() === '數量明細表');
     if (!sheetName) throw new Error('找不到「數量明細表」');
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    const sourceSheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sourceSheet, {
       header: 1, defval: null, raw: true,
     });
     const schemas = buildWorkSchemas(rows);
@@ -1564,11 +1718,16 @@ async function importExcel(event) {
         room: `A${clean(row[1]).replace(/^A/i, '').padStart(2, '0')}`,
         space: clean(row[2]),
         position: clean(row[3]),
-        area: n(row[5]),
+        width: extractRowSourceWidth(row, schemas),
         materials: extractRowMaterials(row, rowNumber, schemas),
-      }));
+    }));
     const detectedWorks = detectedWorksFromSource(source, schemas);
-    await api('setSource', { source, sourceName: file.name, detectedWorks });
+    // 另存「數量明細表」的靜態值快照。匯出只保留這一頁，因此把公式固定成
+    // 匯入當下的計算值，避免原活頁簿其他分頁未隨附時產生失效參照。
+    const sourceSheetBase64 = buildSourceSheetSnapshot(sourceSheet, schemas[0]?.start ?? 6);
+    await api('setSource', {
+      source, sourceName: file.name, detectedWorks, sourceSheetBase64,
+    });
     await syncState();
     initFloor();
     initWorkOptions();
@@ -1581,6 +1740,87 @@ async function importExcel(event) {
   } finally {
     event.target.value = '';
   }
+}
+
+function remapRangeAfterColumnRemoval(range, startColumn, endColumn) {
+  const removedCount = endColumn - startColumn + 1;
+  const remapStart = (column) => {
+    if (column < startColumn) return column;
+    if (column > endColumn) return column - removedCount;
+    return startColumn;
+  };
+  const remapEnd = (column) => {
+    if (column < startColumn) return column;
+    if (column > endColumn) return column - removedCount;
+    return startColumn - 1;
+  };
+  const decoded = typeof range === 'string' ? XLSX.utils.decode_range(range) : range;
+  const shifted = {
+    s: { r: decoded.s.r, c: remapStart(decoded.s.c) },
+    e: { r: decoded.e.r, c: remapEnd(decoded.e.c) },
+  };
+  return shifted.e.c < shifted.s.c ? null : shifted;
+}
+
+function removeSnapshotColumns(sheet, startColumn, endColumn) {
+  if (!(endColumn >= startColumn)) return sheet;
+  const removedCount = endColumn - startColumn + 1;
+  const trimmed = {};
+  Object.entries(sheet).forEach(([address, value]) => {
+    if (address.startsWith('!')) return;
+    const cell = XLSX.utils.decode_cell(address);
+    if (cell.c >= startColumn && cell.c <= endColumn) return;
+    if (cell.c > endColumn) cell.c -= removedCount;
+    trimmed[XLSX.utils.encode_cell(cell)] = value;
+  });
+  Object.entries(sheet).forEach(([key, value]) => {
+    if (key.startsWith('!')) trimmed[key] = value;
+  });
+  if (sheet['!ref']) {
+    const shiftedRef = remapRangeAfterColumnRemoval(sheet['!ref'], startColumn, endColumn);
+    trimmed['!ref'] = shiftedRef ? XLSX.utils.encode_range(shiftedRef) : 'A1:A1';
+  }
+  if (Array.isArray(sheet['!merges'])) {
+    trimmed['!merges'] = sheet['!merges']
+      .map((range) => remapRangeAfterColumnRemoval(range, startColumn, endColumn))
+      .filter(Boolean);
+  }
+  if (Array.isArray(sheet['!cols'])) trimmed['!cols'] = sheet['!cols'].filter((_, index) => (
+    index < startColumn || index > endColumn
+  ));
+  if (sheet['!autofilter']?.ref) {
+    const shiftedFilter = remapRangeAfterColumnRemoval(sheet['!autofilter'].ref, startColumn, endColumn);
+    if (shiftedFilter) trimmed['!autofilter'] = {
+      ...sheet['!autofilter'], ref: XLSX.utils.encode_range(shiftedFilter),
+    };
+    else delete trimmed['!autofilter'];
+  }
+  return trimmed;
+}
+
+function buildSourceSheetSnapshot(sourceSheet, firstWorkColumn = 6) {
+  const snapshot = JSON.parse(JSON.stringify(sourceSheet));
+  Object.keys(snapshot).forEach((address) => {
+    if (address.startsWith('!') || !snapshot[address] || typeof snapshot[address] !== 'object') return;
+    delete snapshot[address].f;
+    delete snapshot[address].F;
+    delete snapshot[address].D;
+  });
+  // A:F 是樓層、房號、空間等基本資料；第一個工項之前的 G 欄起始區段
+  // 是「扣除面積」計算欄。原始 CJ 起為各項係數設定及其他輔助資料，皆不保留。
+  // 先移除右側 CJ 到最末欄，避免左側欄位刪除後使原始座標位移。
+  const sourceRange = XLSX.utils.decode_range(snapshot['!ref'] || 'A1:A1');
+  const coefficientStartColumn = XLSX.utils.decode_col('CJ');
+  let trimmedSnapshot = sourceRange.e.c >= coefficientStartColumn
+    ? removeSnapshotColumns(snapshot, coefficientStartColumn, sourceRange.e.c)
+    : snapshot;
+  trimmedSnapshot = removeSnapshotColumns(trimmedSnapshot, 6, firstWorkColumn - 1);
+  return XLSX.write({
+    SheetNames: ['數量明細表'],
+    Sheets: { 數量明細表: trimmedSnapshot },
+  }, {
+    bookType: 'xlsx', type: 'base64', cellStyles: true, compression: true,
+  });
 }
 
 function sourceMaterialText(row, work) {
@@ -1634,179 +1874,560 @@ function reportLocations(report) {
   return buildReportLocations(report.work, clean(report.floor), report.items || []);
 }
 
-function locationKey(location) {
-  return [location.work, location.floor, location.room, location.code, location.position].join('|');
+function exportMaterialKey(work, material) {
+  return [workIdentity(work), clean(material?.category), clean(material?.name), clean(material?.unit)].join('|');
 }
 
-function materialMapKey(item) {
-  return `${item.category}|${item.name}`;
+function reportAreaKey(location) {
+  return [clean(location.floor), clean(location.room), spaceCode(location.code)].join('|');
 }
 
-function addMaterial(map, item, quantity) {
-  const key = materialMapKey(item);
-  const current = map.get(key) || {
-    name: item.name, category: item.category, unit: item.unit, qty: 0,
-  };
-  current.qty += n(quantity);
-  map.set(key, current);
+function reportLocationKey(location) {
+  return [
+    workIdentity(location.work), clean(location.floor), clean(location.room),
+    spaceCode(location.code), clean(location.position),
+  ].join('|');
 }
 
-function locationArea(location) {
-  return db.source.filter((row) => row.floor === location.floor
-    && row.room === location.room
-    && spaceCode(row.space) === location.code
-    && clean(row.position) === clean(location.position))
-    .reduce((sum, row) => sum + n(row.area), 0);
-}
-
-function aggregateFeedback() {
-  const groups = new Map();
-  const ensureGroup = (location) => {
-    const key = locationKey(location);
-    if (!groups.has(key)) groups.set(key, {
-      ...location,
-      labels: new Set(location.labels || []),
-      reporters: new Set(),
-      dates: new Set(),
-      workers: 0,
-      area: locationArea(location),
-      actual: new Map(),
+function reportAreas(report) {
+  const areas = new Map();
+  reportLocations(report).forEach((location) => {
+    const key = reportAreaKey(location);
+    if (!areas.has(key)) areas.set(key, {
+      work: location.work || report.work,
+      floor: clean(location.floor || report.floor),
+      room: clean(location.room),
+      code: spaceCode(location.code),
+      labels: new Set(),
+      positions: new Set(),
     });
-    return groups.get(key);
+    const area = areas.get(key);
+    (location.labels || []).forEach((label) => area.labels.add(clean(label)));
+    if (clean(location.position)) area.positions.add(clean(location.position));
+  });
+  return [...areas.values()];
+}
+
+function reportSpaceText(area) {
+  const labels = [...area.labels].filter(Boolean);
+  if (labels.length) return labels.join('、');
+  const planLabels = [...new Set(planSpots
+    .filter((spot) => spot.room === area.room && spaceCode(spot.code) === area.code)
+    .map((spot) => clean(spot.label)).filter(Boolean))];
+  if (planLabels.length) return planLabels.join('、');
+  return area.code;
+}
+
+function reportAreaMaterials(report, areas) {
+  const output = new Map(areas.map((area) => [reportAreaKey(area), new Map()]));
+  const add = (areaKey, work, material, quantity) => {
+    if (!output.has(areaKey) || !(n(quantity) > 0)) return;
+    const key = exportMaterialKey(work, material);
+    output.get(areaKey).set(key, (output.get(areaKey).get(key) || 0) + n(quantity));
   };
-  for (const report of db.reports) {
-    const locations = reportLocations(report);
-    locations.forEach((location) => {
-      const group = ensureGroup(location);
-      (location.labels || []).forEach((label) => group.labels.add(label));
-      group.reporters.add(report.reporter);
-      group.dates.add(report.date);
-      group.workers += n(report.workers);
-    });
-    for (const material of report.materials || []) {
-      if (Array.isArray(material.allocations) && material.allocations.length) {
-        material.allocations.forEach((allocation) => {
-          const location = {
-            work: allocation.work || report.work,
-            floor: clean(allocation.floor || report.floor),
-            room: allocation.room,
-            code: spaceCode(allocation.code),
-            position: clean(allocation.position) || defaultPosition(report.work),
-            labels: [],
-          };
-          addMaterial(ensureGroup(location).actual, material, allocation.qty);
-        });
-      } else {
-        const weights = locations.map((location) => materialWeight(location, material));
-        const total = weights.reduce((sum, value) => sum + value, 0);
-        locations.forEach((location, index) => {
-          const share = total ? weights[index] / total : 1 / Math.max(1, locations.length);
-          if (share > 0) addMaterial(ensureGroup(location).actual, material, n(material.qty) * share);
-        });
-      }
+
+  (report.materials || []).forEach((material) => {
+    if (Array.isArray(material.allocations) && material.allocations.length) {
+      material.allocations.forEach((allocation) => add(
+        reportAreaKey(allocation), allocation.work || report.work, material, allocation.qty,
+      ));
+      return;
     }
-  }
-  return [...groups.values()].sort((a, b) => n(a.floor) - n(b.floor)
-    || a.room.localeCompare(b.room, 'zh-TW')
-    || a.work.localeCompare(b.work, 'zh-TW')
-    || a.code.localeCompare(b.code, 'zh-TW')
-    || a.position.localeCompare(b.position, 'zh-TW'));
+
+    const weighted = areas.map((area) => {
+      const matchingLocations = reportLocations(report).filter((location) => reportAreaKey(location) === reportAreaKey(area));
+      return matchingLocations.reduce((sum, location) => sum + materialWeight(location, material), 0);
+    });
+    const totalWeight = weighted.reduce((sum, value) => sum + value, 0);
+    areas.forEach((area, index) => {
+      const share = totalWeight ? weighted[index] / totalWeight : 1 / Math.max(1, areas.length);
+      add(reportAreaKey(area), report.work, material, n(material.qty) * share);
+    });
+  });
+  return output;
 }
 
-function getMaterial(group, name) {
-  return [...group.actual.values()].find((item) => item.name === name)?.qty ?? '';
+function combinedReportArea(report) {
+  const areas = reportAreas(report);
+  const floors = [...new Set(areas.map((area) => area.floor).filter(Boolean))];
+  const rooms = [...new Set(areas.map((area) => area.room).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'zh-TW', { numeric: true }));
+  const spaces = [...new Set(areas.map(reportSpaceText).filter(Boolean))];
+  return {
+    areas,
+    signature: areas.map(reportAreaKey).sort((a, b) => a.localeCompare(b, 'zh-TW')).join('||'),
+    floor: floors.join('、'),
+    room: rooms.join('、'),
+    space: spaces.join('、'),
+  };
 }
 
-function tileModels(group) {
-  return [...group.actual.values()].filter((item) => item.category === '磁磚');
+function sourceWidth(row) {
+  // 2026-08 舊版雖命名為 area，實際存放的就是數量明細表 F 欄「寬度」。
+  return n(row?.width ?? row?.area);
 }
 
-function exportRow(group) {
-  const row = Array(24).fill('');
-  row[0] = exportWorkLabel(group.work);
-  row[1] = [...group.reporters].join('、');
-  row[2] = `${group.floor}F`;
-  row[3] = group.room;
-  row[4] = group.code;
-  row[5] = group.position;
-  row[6] = group.dates.size;
-  if (group.work === '磁磚-地磚') {
-    const models = tileModels(group);
-    row[7] = [...new Set(models.map((item) => item.name))].join('、');
-    row[8] = models.reduce((sum, item) => sum + n(item.qty), 0) || '';
-    row[9] = getMaterial(group, 'TF830');
-    row[10] = getMaterial(group, 'TG67');
-    row[11] = getMaterial(group, 'TG63(細)');
-  } else if (group.work === '磁磚-壁磚') {
-    const models = tileModels(group);
-    row[12] = [...new Set(models.map((item) => item.name))].join('、');
-    row[13] = models.reduce((sum, item) => sum + n(item.qty), 0) || '';
-    row[14] = getMaterial(group, 'TF850');
-    row[15] = getMaterial(group, 'TG67');
-    row[16] = getMaterial(group, 'TG63(細)');
-  } else if (group.work === '隔音地板') {
-    row[17] = getMaterial(group, 'A膠');
-    row[18] = getMaterial(group, 'B膠');
-    row[19] = getMaterial(group, '隔-水泥');
-    row[20] = getMaterial(group, '隔-砂');
-    row[21] = getMaterial(group, '底-TF830');
-    row[22] = getMaterial(group, '底-水泥');
-    row[23] = getMaterial(group, '底-砂');
-  }
-  return row;
+function reportLocationArea(location) {
+  const positions = clean(location.position)
+    .split(/[、,，/]+/).map(clean).filter(Boolean);
+  const matching = db.source.filter((row) => row.floor === clean(location.floor)
+    && row.room === clean(location.room)
+    && spaceCode(row.space) === spaceCode(location.code)
+    && (!positions.length || !clean(row.position) || positions.includes(clean(row.position))));
+  return matching.reduce((sum, row) => sum + sourceWidth(row), 0);
 }
 
-function writeExportCell(sheet, row, column, value) {
-  const address = XLSX.utils.encode_cell({ r: row, c: column });
-  const numeric = typeof value === 'number';
-  sheet[address] = {
-    v: value,
-    t: numeric ? 'n' : 's',
-    s: {
-      font: { name: 'Microsoft JhengHei', sz: 10, color: { rgb: '000000' } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border: {
-        top: { style: 'thin', color: { rgb: 'B7B7B7' } },
-        bottom: { style: 'thin', color: { rgb: 'B7B7B7' } },
-        left: { style: 'thin', color: { rgb: 'B7B7B7' } },
-        right: { style: 'thin', color: { rgb: 'B7B7B7' } },
-      },
-      numFmt: numeric ? '0.###' : 'General',
+function uniqueText(values, compareNumeric = false) {
+  return [...new Set(values.map(clean).filter(Boolean))].sort((a, b) => (
+    compareNumeric ? n(a) - n(b) : a.localeCompare(b, 'zh-TW', { numeric: true })
+  ));
+}
+
+function reportPositionText(locations) {
+  return uniqueText(locations.map((location) => location.position)).join('、');
+}
+
+function reportMaterialDetailText(report) {
+  return (report.materials || [])
+    .filter((material) => clean(material.name) && n(material.qty) > 0)
+    .map((material) => `${clean(material.name)} ${n(material.qty).toFixed(1)}${clean(material.unit)}`)
+    .join('、');
+}
+
+/** 第一分頁：每一筆前端填報保留一列，材料以容易閱讀的文字明細呈現。 */
+function submissionDetailRows() {
+  return db.reports.map((report) => {
+    const locations = reportLocations(report);
+    const floors = uniqueText(locations.map((location) => location.floor), true);
+    const rooms = uniqueText(locations.map((location) => location.room));
+    const spaces = uniqueText(locations.map((location) => {
+      const area = {
+        room: location.room,
+        code: spaceCode(location.code),
+        labels: new Set(location.labels || []),
+      };
+      return reportSpaceText(area);
+    }));
+    return {
+      date: clean(report.date),
+      reporter: clean(report.reporter),
+      work: workLabel(report.work),
+      floor: floors.map((floor) => `${floor}F`).join('、'),
+      room: rooms.join('、'),
+      space: spaces.join('、'),
+      position: reportPositionText(locations),
+      workers: n(report.workers),
+      materialDetail: reportMaterialDetailText(report),
+      note: clean(report.note),
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date)
+    || n(a.floor) - n(b.floor)
+    || a.room.localeCompare(b.room, 'zh-TW', { numeric: true })
+    || a.work.localeCompare(b.work, 'zh-TW'));
+}
+
+function materialSummaryKey(material) {
+  return [clean(material?.name).toLowerCase(), clean(material?.unit).toLowerCase()].join('|');
+}
+
+function actualMaterialColumns() {
+  const found = new Map();
+  db.reports.forEach((report) => (report.materials || []).forEach((material) => {
+    const name = clean(material?.name);
+    if (!name) return;
+    const key = materialSummaryKey(material);
+    if (!found.has(key)) found.set(key, {
+      key, name, unit: clean(material.unit), category: clean(material.category),
+    });
+  }));
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-TW', { numeric: true })
+    || a.unit.localeCompare(b.unit, 'zh-TW'));
+}
+
+function locationSpaceText(location) {
+  const area = {
+    room: location.room,
+    code: spaceCode(location.code),
+    labels: new Set(location.labels || []),
+  };
+  return reportSpaceText(area);
+}
+
+function matchingReportLocation(locations, allocation) {
+  const exactKey = reportLocationKey({ ...allocation, work: allocation.work || locations[0]?.work });
+  return locations.find((location) => reportLocationKey(location) === exactKey)
+    || locations.find((location) => clean(location.floor) === clean(allocation.floor)
+      && clean(location.room) === clean(allocation.room)
+      && spaceCode(location.code) === spaceCode(allocation.code))
+    || { ...allocation, labels: [] };
+}
+
+/** 第二分頁：同一空間使用兩種材料時分成兩列；同一材料用在兩個空間也分成兩列。 */
+function feedbackDetailRows() {
+  const rows = [];
+  db.reports.forEach((report) => {
+    const locations = reportLocations(report);
+    const grouped = new Map();
+    const usedLocations = new Set();
+
+    (report.materials || []).forEach((material) => {
+      if (!clean(material.name) || !(n(material.qty) > 0)) return;
+      const allocations = Array.isArray(material.allocations) && material.allocations.length
+        ? material.allocations
+        : allocateMaterial(material, locations);
+      allocations.forEach((allocation) => {
+        if (!(n(allocation.qty) > 0)) return;
+        const location = matchingReportLocation(locations, {
+          ...allocation, work: allocation.work || report.work,
+        });
+        const locationKey = reportLocationKey(location);
+        const key = `${locationKey}||${materialSummaryKey(material)}||${clean(material.category)}`;
+        if (!grouped.has(key)) grouped.set(key, {
+          date: clean(report.date),
+          reporter: clean(report.reporter),
+          work: workLabel(location.work || report.work),
+          floor: `${clean(location.floor || report.floor)}F`,
+          room: clean(location.room),
+          space: locationSpaceText(location),
+          position: clean(location.position),
+          area: reportLocationArea(location),
+          material: clean(material.name),
+          category: clean(material.category),
+          quantity: 0,
+          unit: clean(material.unit),
+        });
+        grouped.get(key).quantity += n(allocation.qty);
+        usedLocations.add(locationKey);
+      });
+    });
+
+    rows.push(...grouped.values());
+    locations.forEach((location) => {
+      const locationKey = reportLocationKey(location);
+      if (usedLocations.has(locationKey)) return;
+      rows.push({
+        date: clean(report.date),
+        reporter: clean(report.reporter),
+        work: workLabel(location.work || report.work),
+        floor: `${clean(location.floor || report.floor)}F`,
+        room: clean(location.room),
+        space: locationSpaceText(location),
+        position: clean(location.position),
+        area: reportLocationArea(location),
+        material: '', category: '', quantity: '', unit: '',
+      });
+    });
+  });
+  return rows.sort((a, b) => a.date.localeCompare(b.date)
+    || n(a.floor) - n(b.floor)
+    || a.room.localeCompare(b.room, 'zh-TW', { numeric: true })
+    || a.space.localeCompare(b.space, 'zh-TW')
+    || a.material.localeCompare(b.material, 'zh-TW', { numeric: true }));
+}
+
+/** 第三分頁：日期是唯一彙總層級；出工數與材料量採每筆回報直接加總。 */
+function dailySummaryRows(materialColumns = actualMaterialColumns()) {
+  const grouped = new Map();
+  db.reports.forEach((report) => {
+    const date = clean(report.date);
+    if (!grouped.has(date)) grouped.set(date, {
+      date, area: 0, workers: 0, areaKeys: new Set(), materials: new Map(),
+    });
+    const row = grouped.get(date);
+    row.workers += n(report.workers);
+    reportLocations(report).forEach((location) => {
+      const key = reportLocationKey(location);
+      if (row.areaKeys.has(key)) return;
+      row.areaKeys.add(key);
+      row.area += reportLocationArea(location);
+    });
+    (report.materials || []).forEach((material) => {
+      const key = materialSummaryKey(material);
+      row.materials.set(key, (row.materials.get(key) || 0) + n(material.qty));
+    });
+  });
+  return [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date)).map((row) => ({
+    ...row,
+    materialValues: materialColumns.map((column) => row.materials.get(column.key) || 0),
+  }));
+}
+
+function exportSheetStyle(rowIndex, centered = true) {
+  const borderColor = { rgb: 'D7DEE8' };
+  const header = rowIndex === 0;
+  const fill = header ? '1F4E78' : (rowIndex % 2 ? 'F7F9FC' : 'FFFFFF');
+  return {
+    font: {
+      name: 'Microsoft JhengHei', sz: header ? 10 : 9,
+      bold: header, color: { rgb: header ? 'FFFFFF' : '1F2937' },
+    },
+    fill: { patternType: 'solid', fgColor: { rgb: fill } },
+    alignment: {
+      horizontal: centered ? 'center' : 'left',
+      vertical: 'center', wrapText: header,
+    },
+    border: {
+      top: { style: 'thin', color: borderColor },
+      bottom: { style: 'thin', color: borderColor },
+      left: { style: 'thin', color: borderColor },
+      right: { style: 'thin', color: borderColor },
     },
   };
 }
 
-function addStatisticsSheet(workbook, groups) {
+function buildFlatReportSheet(values, widths, numberFormats = {}) {
+  const sheet = XLSX.utils.aoa_to_sheet(values, { sheetStubs: true });
+  const columnCount = values[0]?.length || 1;
+  sheet['!autofilter'] = {
+    ref: `A1:${colName(columnCount - 1)}${Math.max(1, values.length)}`,
+  };
+  sheet['!cols'] = widths.map((wch) => ({ wch }));
+  sheet['!rows'] = [{ hpt: 34 }, ...values.slice(1).map(() => ({ hpt: 22 }))];
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+      if (!sheet[address]) sheet[address] = { t: 's', v: '' };
+      sheet[address].s = exportSheetStyle(rowIndex, true);
+      if (rowIndex > 0 && numberFormats[columnIndex]) sheet[address].z = numberFormats[columnIndex];
+    }
+  }
+  return sheet;
+}
+
+function buildSubmissionSheet(rows) {
   const values = [[
-    '工項', '主辦工程師', '樓層', '房號', '空間', '位置', '施作天數', '總出工人數', '施作面積', '空間名稱',
-  ], ...groups.map((group) => [
-    exportWorkLabel(group.work), [...group.reporters].join('、'), `${group.floor}F`, group.room,
-    group.code, group.position, group.dates.size, group.workers, group.area,
-    [...group.labels].join('、'),
+    '施工日期', '主辦工程師', '工項', '樓層', '房號', '空間', '位置',
+    '出工人數', '材料數量明細', '備註',
+  ], ...rows.map((row) => [
+    row.date, row.reporter, row.work, row.floor, row.room, row.space, row.position,
+    row.workers, row.materialDetail, row.note,
   ])];
-  const sheet = XLSX.utils.aoa_to_sheet(values);
-  sheet['!cols'] = [
-    { wch: 14 }, { wch: 16 }, { wch: 9 }, { wch: 9 }, { wch: 9 },
-    { wch: 9 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 24 },
+  return buildFlatReportSheet(values, [13, 14, 15, 10, 13, 20, 11, 11, 34, 28], { 7: '0.0' });
+}
+
+function buildFeedbackSheet(rows) {
+  const values = [[
+    '施工日期', '主辦工程師', '工項', '樓層', '房號', '空間', '位置',
+    '施作面積（m²）', '材料名稱', '材料分類', '材料用量', '單位',
+  ], ...rows.map((row) => [
+    row.date, row.reporter, row.work, row.floor, row.room, row.space, row.position,
+    row.area || '', row.material, row.category, row.quantity, row.unit,
+  ])];
+  return buildFlatReportSheet(
+    values,
+    [13, 14, 15, 9, 10, 18, 9, 15, 16, 14, 12, 9],
+    { 7: '0.0', 10: '0.0' },
+  );
+}
+
+function buildDailySummarySheet(rows, materialColumns) {
+  const headers = [
+    '施工日期', '施作總面積（m²）', '出工總人數（工）',
+    ...materialColumns.map((column) => `${column.name}${column.unit ? `（${column.unit}）` : ''}`),
   ];
-  values.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
-    const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
-    if (!sheet[address]) return;
-    sheet[address].s = {
-      font: { name: 'Microsoft JhengHei', sz: rowIndex ? 10 : 11, bold: rowIndex === 0 },
-      fill: rowIndex === 0 ? { patternType: 'solid', fgColor: { rgb: 'DCE6F1' } } : undefined,
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border: {
-        top: { style: 'thin', color: { rgb: 'A6A6A6' } },
-        bottom: { style: 'thin', color: { rgb: 'A6A6A6' } },
-        left: { style: 'thin', color: { rgb: 'A6A6A6' } },
-        right: { style: 'thin', color: { rgb: 'A6A6A6' } },
-      },
-    };
+  const values = [headers, ...rows.map((row) => [
+    row.date, row.area, row.workers, ...row.materialValues,
+  ])];
+  const numberFormats = {};
+  headers.slice(1).forEach((_, index) => { numberFormats[index + 1] = '0.0'; });
+  return buildFlatReportSheet(
+    values,
+    [13, 18, 17, ...materialColumns.map((column) => Math.max(13, column.name.length * 2 + 7))],
+    numberFormats,
+  );
+}
+
+function average(values) {
+  const numbers = values.filter((value) => Number.isFinite(value));
+  return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : 0;
+}
+
+function buildUnitAnalysisSheet(rows, materialColumns) {
+  const headers = [
+    '施工日期', '施作總面積（m²）', '工率（m²／工）',
+    ...materialColumns.map((column) => `${column.name}（m²／${column.unit || '單位'}）`),
+  ];
+  const computedRows = rows.map((row) => [
+    row.date,
+    row.area,
+    row.workers > 0 ? Math.round(row.area / row.workers) : '',
+    ...row.materialValues.map((quantity) => (quantity > 0 ? Math.round(row.area / quantity) : '')),
+  ]);
+  if (computedRows.length) {
+    computedRows.push([
+      '平均',
+      Math.round(average(rows.map((row) => row.area))),
+      Math.round(average(computedRows.map((row) => Number.isFinite(row[2]) ? row[2] : NaN))),
+      ...materialColumns.map((_, materialIndex) => Math.round(average(
+        computedRows.map((row) => Number.isFinite(row[materialIndex + 3]) ? row[materialIndex + 3] : NaN),
+      ))),
+    ]);
+  }
+  const values = [headers, ...computedRows];
+  const numberFormats = {};
+  headers.slice(1).forEach((_, index) => { numberFormats[index + 1] = '0'; });
+  const sheet = buildFlatReportSheet(
+    values,
+    [13, 18, 17, ...materialColumns.map((column) => Math.max(15, column.name.length * 2 + 10))],
+    numberFormats,
+  );
+
+  rows.forEach((row, index) => {
+    const excelRow = index + 2;
+    const summaryRow = index + 2;
+    const areaCell = XLSX.utils.encode_cell({ r: excelRow - 1, c: 1 });
+    sheet[areaCell].f = `'統計總表'!B${summaryRow}`;
+    sheet[areaCell].v = row.area;
+    const workerRateCell = XLSX.utils.encode_cell({ r: excelRow - 1, c: 2 });
+    sheet[workerRateCell].f = `IF('統計總表'!C${summaryRow}=0,"",ROUND(B${excelRow}/'統計總表'!C${summaryRow},0))`;
+    sheet[workerRateCell].v = row.workers > 0 ? Math.round(row.area / row.workers) : '';
+    materialColumns.forEach((column, materialIndex) => {
+      const columnIndex = materialIndex + 3;
+      const summaryColumn = colName(materialIndex + 3);
+      const address = XLSX.utils.encode_cell({ r: excelRow - 1, c: columnIndex });
+      sheet[address].f = `IF('統計總表'!${summaryColumn}${summaryRow}=0,"",ROUND(B${excelRow}/'統計總表'!${summaryColumn}${summaryRow},0))`;
+      sheet[address].v = row.materialValues[materialIndex] > 0
+        ? Math.round(row.area / row.materialValues[materialIndex]) : '';
+    });
+  });
+  if (rows.length) {
+    const averageRow = rows.length + 2;
+    for (let columnIndex = 1; columnIndex < headers.length; columnIndex += 1) {
+      const column = colName(columnIndex);
+      const address = XLSX.utils.encode_cell({ r: averageRow - 1, c: columnIndex });
+      sheet[address].f = `ROUND(AVERAGE(${column}2:${column}${averageRow - 1}),0)`;
+    }
+    for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+      const address = XLSX.utils.encode_cell({ r: averageRow - 1, c: columnIndex });
+      sheet[address].s = {
+        ...exportSheetStyle(0, true),
+        fill: { patternType: 'solid', fgColor: { rgb: 'D9EAF7' } },
+        font: { name: 'Microsoft JhengHei', sz: 9, bold: true, color: { rgb: '1F2937' } },
+      };
+      if (columnIndex > 0) sheet[address].z = '0';
+    }
+  }
+  return sheet;
+}
+
+function buildReportWorkbook() {
+  const materialColumns = actualMaterialColumns();
+  const submissions = submissionDetailRows();
+  const feedback = feedbackDetailRows();
+  const summaries = dailySummaryRows(materialColumns);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, buildSubmissionSheet(submissions), '填列明細表');
+  XLSX.utils.book_append_sheet(workbook, buildFeedbackSheet(feedback), '後台回饋明細');
+  XLSX.utils.book_append_sheet(workbook, buildDailySummarySheet(summaries, materialColumns), '統計總表');
+  XLSX.utils.book_append_sheet(workbook, buildUnitAnalysisSheet(summaries, materialColumns), '單位用量分析');
+  workbook.Props = {
+    Title: '東仁安居工務回報紀錄',
+    Subject: '填列明細、每日回饋、每日統計與單位用量分析',
+    Author: '東仁安居工務回報系統',
+  };
+  workbook.Workbook = workbook.Workbook || {};
+  workbook.Workbook.CalcPr = { calcMode: 'auto', fullCalcOnLoad: '1', forceFullCalc: '1' };
+  return {
+    workbook,
+    submissionCount: submissions.length,
+    feedbackCount: feedback.length,
+    summaryCount: summaries.length,
+  };
+}
+
+/*
+ * SheetJS 社群版會保留數字格式，但不會輸出儲存格的對齊、底色與框線。
+ * 匯出後用 JSZip 補上標準 OpenXML 樣式，確保第二頁所有資料置中、數值顯示一位小數，
+ * 並讓四個分頁在 Excel 與網頁版 Excel 中都有一致的表頭及框線。
+ */
+const EXCEL_EXPORT_STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="164" formatCode="0.0"/></numFmts>
+  <fonts count="3">
+    <font><sz val="10"/><color rgb="FF1F2937"/><name val="Microsoft JhengHei"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Microsoft JhengHei"/></font>
+    <font><b/><sz val="10"/><color rgb="FF1F2937"/><name val="Microsoft JhengHei"/></font>
+  </fonts>
+  <fills count="4">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFD9EAF7"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFD7DEE8"/></left>
+      <right style="thin"><color rgb="FFD7DEE8"/></right>
+      <top style="thin"><color rgb="FFD7DEE8"/></top>
+      <bottom style="thin"><color rgb="FFD7DEE8"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="5">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="1" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>
+</styleSheet>`;
+
+function restyleWorksheetXml(xml) {
+  const averageMatch = xml.match(/<c\b[^>]*\br="A(\d+)"[^>]*\bt="str"[^>]*><v>平均<\/v><\/c>/);
+  const averageRow = averageMatch ? Number(averageMatch[1]) : 0;
+  let styled = xml.replace(/<c\b([^>]*)>/g, (tag, attributes) => {
+    const reference = attributes.match(/\br="[A-Z]+(\d+)"/);
+    if (!reference) return tag;
+    const rowNumber = Number(reference[1]);
+    const currentStyle = Number(attributes.match(/\bs="(\d+)"/)?.[1] || 0);
+    const nextStyle = rowNumber === 1 ? 3 : (currentStyle === 1 ? 1 : (currentStyle === 2 ? 2 : 0));
+    const cleanAttributes = attributes.replace(/\s+s="\d+"/, '');
+    return `<c${cleanAttributes} s="${nextStyle}">`;
+  });
+  if (averageRow) {
+    const rowPattern = new RegExp(`(<row\\b[^>]*\\br="${averageRow}"[^>]*>)([\\s\\S]*?)(<\\/row>)`);
+    styled = styled.replace(rowPattern, (match, open, cells, close) => (
+      `${open}${cells.replace(/<c\b([^>]*)>/g, (tag, attributes) => {
+        const cleanAttributes = attributes.replace(/\s+s="\d+"/, '');
+        return `<c${cleanAttributes} s="4">`;
+      })}${close}`
+    ));
+  }
+  return styled.replace(
+    /<sheetView workbookViewId="0"\s*\/>/,
+    '<sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView>',
+  );
+}
+
+async function styleExportWorkbook(bytes) {
+  if (typeof JSZip === 'undefined') return bytes;
+  const archive = await JSZip.loadAsync(bytes);
+  archive.file('xl/styles.xml', EXCEL_EXPORT_STYLES_XML);
+  const sheetPaths = Object.keys(archive.files).filter((path) => /^xl\/worksheets\/sheet\d+\.xml$/.test(path));
+  await Promise.all(sheetPaths.map(async (path) => {
+    const xml = await archive.file(path).async('string');
+    archive.file(path, restyleWorksheetXml(xml));
   }));
-  const name = '施工統計補充';
-  workbook.Sheets[name] = sheet;
-  if (!workbook.SheetNames.includes(name)) workbook.SheetNames.push(name);
+  return archive.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+}
+
+function downloadWorkbookBytes(bytes, filename) {
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function exportReports() {
@@ -1814,22 +2435,23 @@ async function exportReports() {
   if (!db.reports.length) return toast('尚無回報紀錄可匯出', true);
   try {
     if (typeof XLSX === 'undefined') throw new Error('Excel 元件尚未載入，請確認 xlsx.full.min.js 已上傳');
-    const response = await fetchAsset('report-template.xlsx');
-    const workbook = XLSX.read(await response.arrayBuffer(), { type: 'array', cellStyles: true });
-    const sheetName = workbook.SheetNames.find((name) => name.trim() === '實際用量回饋表');
-    if (!sheetName) throw new Error('範本缺少「實際用量回饋表」');
-    const sheet = workbook.Sheets[sheetName];
-    const groups = aggregateFeedback();
-    groups.forEach((group, index) => exportRow(group)
-      .forEach((value, column) => writeExportCell(sheet, index + 2, column, value)));
-    sheet['!ref'] = XLSX.utils.encode_range({
-      s: { r: 0, c: 0 }, e: { r: Math.max(1, groups.length + 1), c: 23 },
+    if (backendCapabilities.sourceSheetSnapshot === true) {
+      const snapshot = await api('getSourceSheetSnapshot');
+      if (snapshot.sourceSheetBase64) {
+        const sourceWorkbook = XLSX.read(snapshot.sourceSheetBase64, {
+          type: 'base64', cellStyles: true, cellFormula: true, cellNF: true,
+        });
+        const sourceName = sourceWorkbook.SheetNames.find((name) => name.trim() === '數量明細表');
+        if (sourceName) hydrateSourceWidthsFromSheet(sourceWorkbook.Sheets[sourceName]);
+      }
+    }
+    const output = buildReportWorkbook();
+    const workbookBytes = XLSX.write(output.workbook, {
+      bookType: 'xlsx', type: 'array', cellStyles: true, compression: true,
     });
-    sheet['!rows'] = sheet['!rows'] || [];
-    groups.forEach((_, index) => { sheet['!rows'][index + 2] = { hpt: 18 }; });
-    addStatisticsSheet(workbook, groups);
-    XLSX.writeFile(workbook, `東仁安居_回報檔案_${today()}.xlsx`, { cellStyles: true });
-    toast(`已依新版格式匯出 ${groups.length} 筆工項／位置統計`);
+    const styledBytes = await styleExportWorkbook(workbookBytes);
+    downloadWorkbookBytes(styledBytes, `東仁安居_回報紀錄_${today()}.xlsx`);
+    toast(`已匯出 ${output.submissionCount} 筆填列、${output.feedbackCount} 筆材料明細、${output.summaryCount} 天統計`);
   } catch (error) {
     toast(`匯出失敗：${error.message}`, true);
   }

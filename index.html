@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>東仁安居｜工務施工回報與管理系統</title>
 <script src="assets/xlsx.full.min.js" onerror="var s=document.createElement('script');s.src='xlsx.full.min.js';document.head.appendChild(s)"></script>
+<script src="assets/jszip.min.js"></script>
 <style>
 :root{--navy:#05070b;--navy2:#111823;--blue:#4b82f7;--blue2:#2d64dc;--ink:#f3f6fb;--muted:#a9b3c2;--line:#2b3544;--bg:#000;--white:#10151d;--green:#36d6a5;--red:#ff7079;--pink:#ef76a6;--pink-bg:#24111b;--shadow:0 12px 36px #0009}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
@@ -178,7 +179,11 @@ select option{background:#101720;color:#f6f8fb}
 .role-admin{color:#ffc08f;background:#321a0c}.role-front{color:#a9c7ff;background:#122440}.role-enabled{color:#82dfbd;background:#0c2a20}.role-disabled{color:#ff9ca4;background:#2b1115}
 .toast{background:#123a2e;color:#e9fff8}.toast.error{background:#6f202b}
 *{scrollbar-color:#596579 #11161d;scrollbar-width:thin}
+.sand-material-line{grid-template-columns:minmax(110px,.35fr) minmax(420px,1.65fr);align-items:start}
+.sand-entry{display:grid;gap:8px}.sand-shapes{display:flex;flex-wrap:wrap;gap:12px}.sand-shapes label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800}.sand-shapes input{accent-color:var(--pink)}
+.sand-dimensions{display:grid;grid-template-columns:repeat(3,minmax(85px,1fr));gap:8px}.sand-dimensions label{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:5px;font-size:11px}.sand-dimensions input{width:100%;min-width:0;border:1px solid #4b3a46;border-radius:8px;background:#0c1118;padding:8px;text-align:right;font-weight:800;color:#ff91ba}.sand-dimensions input:disabled{opacity:.45}.sand-result{font-size:12px;color:#ffb0cc;font-weight:800}
 @media(max-width:720px){.selection-summary{width:100%;justify-content:space-between}.selection-clear{min-height:38px;padding:8px 11px}}
+@media(max-width:720px){.sand-material-line{grid-template-columns:1fr}.sand-dimensions{grid-template-columns:1fr}.sand-shapes{gap:8px}.sand-shapes label{font-size:13px}.sand-dimensions input{font-size:16px}}
 </style>
 </head>
 <body>
@@ -200,7 +205,7 @@ select option{background:#101720;color:#f6f8fb}
       <div class="field"><label>施工日期 *</label><input id="date" type="date"></div>
       <div class="field"><label>填表人 *</label><input id="reporterName" type="text" placeholder="請輸入姓名"></div>
       <div class="field"><label>樓層 *</label><select id="floor" onchange="renderPlanState()"></select></div>
-      <div class="field"><label>施作工項 *</label><select id="work" onchange="draftMaterials={};calculate()"><option value="">工項載入中…</option></select></div>
+      <div class="field"><label>施作工項 *</label><select id="work" onchange="resetMaterialDrafts();calculate()"><option value="">工項載入中…</option></select></div>
     </div>
     <div class="section-label">2. 從平面圖選取房號與施作空間</div>
     <div class="main-grid">
@@ -222,7 +227,7 @@ select option{background:#101720;color:#f6f8fb}
 <section id="back" class="backend panel"><div class="backend-layout">
   <nav class="back-nav"><h3>後台管理</h3><button class="back-tab active" data-tab="reports" onclick="backTab('reports')">施工回報紀錄</button><button class="back-tab" data-tab="source" onclick="backTab('source')">Excel 數量資料</button><button id="workTabBtn" class="back-tab hidden" data-tab="works" onclick="backTab('works')">工項管理</button><button id="accountTabBtn" class="back-tab hidden" data-tab="accounts" onclick="backTab('accounts')">帳號管理</button></nav>
   <div class="back-main">
-    <div id="reports" class="back-view active"><div class="back-head"><h2>施工回報紀錄</h2><div class="toolbar"><input id="reportSearch" class="search" placeholder="搜尋日期、填表人、房號…" oninput="renderReports()"><button class="btn dark" onclick="exportReports()">匯出 Excel</button></div></div><div class="template-note">匯出會保留新版「回報檔案格式.xlsx」的 A:X 欄位，另附施工統計頁保存日期、施作面積與總出工人數。</div><div class="table-wrap"><table class="table"><thead><tr><th>日期</th><th>填表人</th><th>樓層</th><th>房號／空間</th><th>工項</th><th>人數</th><th>材料</th><th>備註</th><th></th></tr></thead><tbody id="reportBody"></tbody></table></div></div>
+    <div id="reports" class="back-view active"><div class="back-head"><h2>施工回報紀錄</h2><div class="toolbar"><input id="reportSearch" class="search" placeholder="搜尋日期、填表人、房號…" oninput="renderReports()"><button class="btn dark" onclick="exportReports()">匯出 Excel</button></div></div><div class="template-note">匯出檔共有四頁：「填列明細表」保留每筆前端填報；「後台回饋明細」依日期、空間與材料逐列展開；「統計總表」按日合計施作面積、出工人數及材料用量；「單位用量分析」以施作總面積除以出工人數或材料總量，四捨五入到整數。</div><div class="table-wrap"><table class="table"><thead><tr><th>日期</th><th>填表人</th><th>樓層</th><th>房號／空間</th><th>工項</th><th>人數</th><th>材料</th><th>備註</th><th></th></tr></thead><tbody id="reportBody"></tbody></table></div></div>
     <div id="source" class="back-view"><div class="back-head"><h2>Excel 數量資料</h2><label class="btn primary file">匯入數量明細 Excel<input id="excel" type="file" accept=".xlsx,.xls" onchange="importExcel(event)"></label></div><div class="template-note">匯入含有「數量明細表」的 Excel 後，系統會自動辨識第 2–5 列中的工項、材料表頭與各區域數量，並同步新增工項及材料連動。</div><div class="source-stats"><div class="stat"><span>來源檔案</span><b id="sourceName">尚未匯入</b></div><div class="stat"><span>有效資料</span><b id="sourceRows">0 筆</b></div><div class="stat"><span>辨識工項</span><b id="sourceWorks">0 項</b></div><div class="stat"><span>涵蓋樓層</span><b id="sourceFloors">—</b></div></div><input id="sourceSearch" class="search" style="margin-bottom:10px" placeholder="搜尋房號、空間或材料…" oninput="renderSource()"><div class="table-wrap"><table class="table"><thead><tr id="sourceHead"><th>樓層</th><th>房號</th><th>空間</th><th>位置</th></tr></thead><tbody id="sourceBody"></tbody></table></div></div>
     <div id="works" class="back-view"><div class="back-head"><h2>工項管理</h2></div>
       <div class="template-note">工項設定會保存在 Google 試算表的 <b>works</b> 分頁。新增後前端立即可選；停用只會從前端選單隱藏，既有回報與 Excel 資料都會保留。</div>
@@ -290,6 +295,6 @@ select option{background:#101720;color:#f6f8fb}
 </div></div>
 
 <script src="config.js?v=20260819-2"></script>
-<script src="app.js?v=20260903-3"></script>
+<script src="app.js?v=20260928-1"></script>
 </body>
 </html>
